@@ -397,11 +397,11 @@ static int _ecall_poll_test(INTERFACE& x, size_t buff_len, char* recv_buff)
     printf("polling...\n");
     if (file_fd >= 0)
     {
-        pollfds[0].fd = file_fd;
-        pollfds[0].events =
+        pollfds[1].fd = file_fd;
+        pollfds[1].events =
             (POLLIN | POLLPRI | POLLOUT | POLLRDNORM | POLLRDBAND | POLLWRNORM |
              POLLWRBAND | POLLRDHUP);
-        pollfds[0].revents = 0;
+        pollfds[1].revents = 0;
     }
 
     size_t nevents = 0;
