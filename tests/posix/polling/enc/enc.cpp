@@ -409,6 +409,8 @@ static int _ecall_poll_test(INTERFACE& x, size_t buff_len, char* recv_buff)
     int ntries = 100;
     do
     {
+        pollfds[0].revents = 0;
+        pollfds[1].revents = 0;
         if ((nfds = x.poll(pollfds, 2, timeout_ms)) < 0)
         {
             printf("poll error.\n");
@@ -418,7 +420,8 @@ static int _ecall_poll_test(INTERFACE& x, size_t buff_len, char* recv_buff)
             printf("input from %d fds\n", nfds);
             nevents++;
 
-            printf("events from pollfds[0]\n", pollfds[0].revents);
+            printf("events from pollfds[0] = %x\n", pollfds[0].revents);
+            printf("events from pollfds[1] = %x\n", pollfds[1].revents);
             if (pollfds[0].revents &
                 (POLLIN | POLLPRI | POLLRDNORM | POLLRDBAND))
             {
