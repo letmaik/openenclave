@@ -81,6 +81,15 @@ static oe_result_t _parse_quote(
     if (p != quote_end)
         OE_RAISE(OE_REPORT_PARSE_ERROR);
 
+    /* (28) */
+    // QE_ID
+    OE_TRACE_VERBOSE("QE ID:\n");
+    for (int i = 0; i < 16; i++)
+    {
+        OE_TRACE_VERBOSE(
+            "user_data[%d] = 0x%0x", i, (*sgx_quote)->user_data[i]);
+    }
+
     result = OE_OK;
 done:
     return result;
