@@ -365,7 +365,7 @@ waiting_for_connection_request:
     }
 
     ret = 0;
-    goto waiting_for_connection_request;
+    // goto waiting_for_connection_request;
 exit:
 
     if (ret != 0)
