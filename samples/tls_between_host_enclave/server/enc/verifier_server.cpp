@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string>
 //#include "../../common/tls_client_enc_pubkey.h"
-#include "../../common/utility.h"
+#include "utility.h"
 
 // TODO: remove this callback
 oe_result_t enclave_identity_verifier_callback(

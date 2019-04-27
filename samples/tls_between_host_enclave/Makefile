@@ -14,4 +14,4 @@ clean:
 run:
 	./server/host/tls_server_host ./server/enc/tls_server_enc.signed -port:12341 &
 	sleep 2
-	./client/tls_client_host -server:localhost -port:12341
+	./client/tls_client -server:localhost -port:12341

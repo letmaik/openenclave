@@ -114,8 +114,8 @@ oe_result_t generate_certificate_and_pkey(
         goto exit;
     }
 
-    printf("public_key_buf_size:[%ld]\n", public_key_buf_size);
-    printf("public key used:\n[%s]", public_key_buf);
+    printf("\n\npublic_key_buf_size:[%ld]\n", public_key_buf_size);
+    printf("public key used:\n[%s]\n\n", public_key_buf);
 
     result = oe_gen_cert_for_tls(
         private_key_buf,

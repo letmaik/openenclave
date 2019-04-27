@@ -26,11 +26,11 @@ LDFLAGS=$(shell pkg-config oehost-$(CXX_COMPILER) --libs)
 all: build
 
 build:
-	$(CXX) -g -c $(CXXFLAGS) $(INCLUDES) host.cpp
-	$(CXX) -o tls_client_host host.o $(LDFLAGS)
+	$(CXX) -g -c $(CXXFLAGS) $(INCLUDES) -I/usr/include/openssl client.cpp callback.cpp check_signer.cpp
+	$(CXX) -o tls_client client.o callback.o check_signer.o $(LDFLAGS)
 
 clean:
-	rm -f tls_client_host host.o
+	rm -f tls_client client.o callback.o check_signer.o ../cert.der
 
 run:
-	./tls_client_host -server:localhost -port:12341
+	./tls_client -server:localhost -port:12341

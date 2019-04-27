@@ -11,6 +11,7 @@ oe_result_t enclave_identity_verifier_callback(
 {
     (void)arg;
     printf(
+        TLS_SERVER
         "enclave_identity_verifier_callback is called with parsed report:\n");
 
     // Check the enclave's security version

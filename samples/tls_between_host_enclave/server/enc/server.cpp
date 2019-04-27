@@ -17,7 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include "../../common/utility.h"
+#include "../../common/common.h"
+#include "utility.h"
 
 oe_result_t enclave_identity_verifier_callback(
     oe_identity_t* identity,
@@ -69,13 +70,15 @@ static int cert_verify_callback(
     (void)data;
     (void)flags;
 
-    printf(" cert_verify_callback with depth = %d\n", depth);
+    printf(TLS_SERVER "cert_verify_callback with depth = %d\n", depth);
 
     cert_buf = crt->raw.p;
     cert_size = crt->raw.len;
 
-    printf("crt->version = %d\n", crt->version);
-    printf("cert_size = %zu\n", cert_size);
+    printf(
+        TLS_SERVER "crt->version = %d cert_size = %zu\n",
+        crt->version,
+        cert_size);
 
     if (cert_size <= 0)
         goto exit;
@@ -85,7 +88,7 @@ static int cert_verify_callback(
     if (result != OE_OK)
     {
         printf(
-            "oe_verify_tls_cert failed with result = %s\n",
+            TLS_SERVER "oe_verify_tls_cert failed with result = %s\n",
             oe_result_str(result));
         goto exit;
     }
@@ -105,16 +108,16 @@ int configure_server_ssl(
     int ret = 1;
     oe_result_t result = OE_FAILURE;
 
-    printf("Generating the certificate and private key\n");
+    printf(TLS_SERVER "Generating the certificate and private key\n");
     result = generate_certificate_and_pkey(server_cert, pkey);
     if (result != OE_OK)
     {
-        printf("failed with %s\n", oe_result_str(result));
+        printf(TLS_SERVER "failed with %s\n", oe_result_str(result));
         ret = 1;
         goto exit;
     }
 
-    printf("Setting up the SSL configuration....\n");
+    printf(TLS_SERVER "Setting up the SSL configuration....\n");
     if ((ret = mbedtls_ssl_config_defaults(
              conf,
              MBEDTLS_SSL_IS_SERVER,
@@ -122,6 +125,7 @@ int configure_server_ssl(
              MBEDTLS_SSL_PRESET_DEFAULT)) != 0)
     {
         printf(
+            TLS_SERVER
             "failed\n  ! mbedtls_ssl_config_defaults returned failed %d\n",
             ret);
         goto exit;
@@ -132,20 +136,22 @@ int configure_server_ssl(
     mbedtls_ssl_conf_session_cache(
         conf, cache, mbedtls_ssl_cache_get, mbedtls_ssl_cache_set);
 
-    // need to set authmode mode to OPTIONAL for requesting client certificate
+    // asked the client to optionally send the server a certificate
     mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
     mbedtls_ssl_conf_verify(conf, cert_verify_callback, NULL);
     mbedtls_ssl_conf_ca_chain(conf, server_cert->next, NULL);
 
     if ((ret = mbedtls_ssl_conf_own_cert(conf, server_cert, pkey)) != 0)
     {
-        printf("failed\n  ! mbedtls_ssl_conf_own_cert returned %d\n", ret);
+        printf(
+            TLS_SERVER "failed\n  ! mbedtls_ssl_conf_own_cert returned %d\n",
+            ret);
         goto exit;
     }
 
     if ((ret = mbedtls_ssl_setup(ssl, conf)) != 0)
     {
-        printf("failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret);
+        printf(TLS_SERVER "failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret);
         goto exit;
     }
     ret = 0;
@@ -170,18 +176,21 @@ int setup_tls_server(char* server_port)
     unsigned char buf[1024];
     const char* pers = "tls_server";
 
+    printf("\nStarting" TLS_SERVER "\n\n\n");
+
     // Explicitly enabling features
     if ((result = oe_load_module_hostresolver()) != OE_OK)
     {
         printf(
-            "oe_load_module_hostresolver failed with %s\n",
+            TLS_SERVER "oe_load_module_hostresolver failed with %s\n",
             oe_result_str(result));
         goto exit;
     }
     if ((result = oe_load_module_hostsock()) != OE_OK)
     {
         printf(
-            "oe_load_module_hostsock failed with %s\n", oe_result_str(result));
+            TLS_SERVER "oe_load_module_hostsock failed with %s\n",
+            oe_result_str(result));
         goto exit;
     }
 
@@ -199,6 +208,7 @@ int setup_tls_server(char* server_port)
     mbedtls_debug_set_threshold(DEBUG_LEVEL);
 
     printf(
+        TLS_SERVER
         "Setup the listening TCP socket on SERVER_IP= [%s] server_port = "
         "[%s]\n",
         SERVER_IP,
@@ -206,15 +216,14 @@ int setup_tls_server(char* server_port)
     if ((ret = mbedtls_net_bind(
              &listen_fd, SERVER_IP, server_port, MBEDTLS_NET_PROTO_TCP)) != 0)
     {
-        printf(" failed\n  ! mbedtls_net_bind returned %d\n", ret);
+        printf(TLS_SERVER " failed\n  ! mbedtls_net_bind returned %d\n", ret);
         goto exit;
     }
 
     printf(
-        "mbedtls_net_bind returned successfully. (listen_fd = %d)\n",
+        TLS_SERVER "mbedtls_net_bind returned successfully. (listen_fd = %d)\n",
         listen_fd.fd);
 
-    printf("Seeding the random number generator (RNG)\n");
     if ((ret = mbedtls_ctr_drbg_seed(
              &ctr_drbg,
              mbedtls_entropy_func,
@@ -222,7 +231,8 @@ int setup_tls_server(char* server_port)
              (const unsigned char*)pers,
              strlen(pers))) != 0)
     {
-        printf(" failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret);
+        printf(
+            TLS_SERVER " failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret);
         goto exit;
     }
 
@@ -231,7 +241,8 @@ int setup_tls_server(char* server_port)
         &ssl, &conf, &cache, &ctr_drbg, &server_cert, &pkey);
     if (ret != 0)
     {
-        printf(" failed\n  ! mbedtls_net_connect returned %d\n", ret);
+        printf(
+            TLS_SERVER " failed\n  ! mbedtls_net_connect returned %d\n", ret);
         goto exit;
     }
 
@@ -241,23 +252,25 @@ waiting_for_connection_request:
     {
         char error_buf[100];
         mbedtls_strerror(ret, error_buf, 100);
-        printf("Last error was: %d - %s\n", ret, error_buf);
+        printf(TLS_SERVER "Last error was: %d - %s\n", ret, error_buf);
     }
 
     // reset ssl setup and client_fd to prepare for the new TLS connection
     mbedtls_net_free(&client_fd);
     mbedtls_ssl_session_reset(&ssl);
 
-    printf("Waiting for a remote connection request...\n");
+    printf(TLS_SERVER "Waiting for a remote connection request...\n\n\n");
     if ((ret = mbedtls_net_accept(&listen_fd, &client_fd, NULL, 0, NULL)) != 0)
     {
         char errbuf[512];
         mbedtls_strerror(ret, errbuf, sizeof(errbuf));
-        printf(" failed\n  ! mbedtls_net_accept returned %d\n\n", ret);
-        printf("%s\n", errbuf);
+        printf(
+            TLS_SERVER "failed\n  ! mbedtls_net_accept returned %d\n\n", ret);
+        printf(TLS_SERVER "%s\n", errbuf);
         goto exit;
     }
     printf(
+        TLS_SERVER
         "mbedtls_net_accept returned successfully.(listen_fd = %d) (client_fd "
         "= %d) \n",
         listen_fd.fd,
@@ -267,21 +280,23 @@ waiting_for_connection_request:
     mbedtls_ssl_set_bio(
         &ssl, &client_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
 
-    printf("Performing the SSL/TLS handshake...\n");
+    printf(TLS_SERVER "Performing the SSL/TLS handshake...\n");
     while ((ret = mbedtls_ssl_handshake(&ssl)) != 0)
     {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ &&
             ret != MBEDTLS_ERR_SSL_WANT_WRITE)
         {
-            printf(" failed\n  ! mbedtls_ssl_handshake returned -0x%x\n", -ret);
+            printf(
+                TLS_SERVER "failed\n  ! mbedtls_ssl_handshake returned -0x%x\n",
+                -ret);
             goto exit;
         }
     }
 
-    printf("mbedtls_ssl_handshake done successfully\n");
+    printf(TLS_SERVER "mbedtls_ssl_handshake done successfully\n");
 
     // Read client's request
-    printf("< Read from client:\n");
+    printf(TLS_SERVER "< Read from client:\n");
     do
     {
         len = sizeof(buf) - 1;
@@ -297,26 +312,28 @@ waiting_for_connection_request:
             switch (ret)
             {
                 case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
-                    printf("connection was closed gracefully\n");
+                    printf(TLS_SERVER "connection was closed gracefully\n");
                     break;
 
                 case MBEDTLS_ERR_NET_CONN_RESET:
-                    printf("connection was reset by peer\n");
+                    printf(TLS_SERVER "connection was reset by peer\n");
                     break;
 
                 default:
-                    printf("mbedtls_ssl_read returned -0x%x\n", -ret);
+                    printf(
+                        TLS_SERVER "mbedtls_ssl_read returned -0x%x\n", -ret);
                     break;
             }
             break;
         }
 
         len = ret;
-        printf(" %d bytes read\n\n%s", len, (char*)buf);
+        printf(TLS_SERVER "%d bytes read\n\n%s", len, (char*)buf);
 #ifdef ADD_TEST_CHECKING
         if (len != CLIENT_REQUEST_PAYLOAD_SIZE) // hard coded to match client
         {
             printf(
+                TLS_SERVER
                 "ERROR: expected reading %d bytes but only got %d bytes\n",
                 CLIENT_REQUEST_PAYLOAD_SIZE,
                 len);
@@ -329,7 +346,7 @@ waiting_for_connection_request:
     } while (1);
 
     // Write a response back to the client
-    printf("> Write to client:\n");
+    printf(TLS_SERVER "> Write to client:\n");
     len = snprintf(
         (char*)buf,
         sizeof(buf) - 1,
@@ -339,27 +356,31 @@ waiting_for_connection_request:
     {
         if (ret == MBEDTLS_ERR_NET_CONN_RESET)
         {
-            printf(" failed\n  ! peer closed the connection\n\n");
+            printf(TLS_SERVER "failed\n  ! peer closed the connection\n\n");
             goto waiting_for_connection_request;
         }
         if (ret != MBEDTLS_ERR_SSL_WANT_READ &&
             ret != MBEDTLS_ERR_SSL_WANT_WRITE)
         {
-            printf(" failed\n  ! mbedtls_ssl_write returned %d\n\n", ret);
+            printf(
+                TLS_SERVER "failed\n  ! mbedtls_ssl_write returned %d\n\n",
+                ret);
             goto exit;
         }
     }
 
     len = ret;
-    printf(" %d bytes written\n", len);
+    printf(TLS_SERVER "%d bytes written\n", len);
 
-    printf("Closing the connection...\n");
+    printf(TLS_SERVER "Closing the connection...\n");
     while ((ret = mbedtls_ssl_close_notify(&ssl)) < 0)
     {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ &&
             ret != MBEDTLS_ERR_SSL_WANT_WRITE)
         {
-            printf("failed! mbedtls_ssl_close_notify returned %d\n\n", ret);
+            printf(
+                TLS_SERVER "failed! mbedtls_ssl_close_notify returned %d\n\n",
+                ret);
             goto waiting_for_connection_request;
         }
     }
@@ -372,7 +393,7 @@ exit:
     {
         char error_buf[100];
         mbedtls_strerror(ret, error_buf, 100);
-        printf("Last error was: %d - %s\n\n", ret, error_buf);
+        printf(TLS_SERVER "Last error was: %d - %s\n\n", ret, error_buf);
     }
 
     // free resource
