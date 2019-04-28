@@ -57,28 +57,31 @@ done:
     return ret;
 }
 
-// Communicate with TLS server
+// This routine conducts a simple HTTP request/response communication with
+// server
 int communicate_with_server(SSL* ssl)
 {
-    unsigned char buf[1024];
+    unsigned char buf[200];
     int ret = 1;
     int error = 0;
     int len = 0;
+    int bytes_written = 0;
+    int bytes_read = 0;
 
     // Write an GET request to the server
     printf(TLS_CLIENT "Write to server-->:\n\n");
     len = snprintf((char*)buf, sizeof(buf) - 1, GET_REQUEST);
-    while ((ret = SSL_write(ssl, buf, (size_t)len)) <= 0)
+    while ((bytes_written = SSL_write(ssl, buf, (size_t)len)) <= 0)
     {
-        error = SSL_get_error(ssl, ret);
+        error = SSL_get_error(ssl, bytes_written);
         if (error == SSL_ERROR_WANT_WRITE)
             continue;
         printf(TLS_CLIENT "Failed! SSL_write returned %d\n", error);
+        ret = bytes_written;
         goto done;
     }
 
-    len = ret;
-    printf(TLS_CLIENT "\n\n%d bytes written\n%s\n", len, (char*)buf);
+    printf(TLS_CLIENT "\n\n%d bytes written\n%s\n", bytes_written, (char*)buf);
 
     // Read the HTTP response from server
     printf(TLS_CLIENT "\n\n<-- Read from server:\n");
@@ -86,28 +89,29 @@ int communicate_with_server(SSL* ssl)
     {
         len = sizeof(buf) - 1;
         memset(buf, 0, sizeof(buf));
-        ret = SSL_read(ssl, buf, (size_t)len);
-        if (ret <= 0)
+        bytes_read = SSL_read(ssl, buf, (size_t)len);
+        if (bytes_read <= 0)
         {
-            int error = SSL_get_error(ssl, ret);
+            int error = SSL_get_error(ssl, bytes_read);
             if (error == SSL_ERROR_WANT_READ)
                 continue;
 
             printf(TLS_CLIENT "Failed! SSL_read returned error=%d\n", error);
+            ret = bytes_read;
             break;
         }
 
-        len = ret;
-        printf(TLS_CLIENT " %d bytes read\n%s", len, (char*)buf);
+        printf(TLS_CLIENT " %d bytes read\n%s", bytes_read, (char*)buf);
 #ifdef ADD_TEST_CHECKING
-        if (len != SERVER_RESPONSE_PAYLOAD_SIZE) // hard-coded to match server
+        // check to to see if the number of bytes received is expected
+        if (bytes_read != SERVER_RESPONSE_PAYLOAD_SIZE)
         {
             printf(
                 TLS_CLIENT
                 "ERROR: expected reading %d bytes but only received %d bytes\n",
                 SERVER_RESPONSE_PAYLOAD_SIZE,
-                len);
-            ret = 1;
+                bytes_read);
+            ret = bytes_read;
             goto done;
         }
         else
@@ -119,7 +123,6 @@ int communicate_with_server(SSL* ssl)
         }
 #endif
     } while (1);
-
     ret = 0;
 done:
     return ret;
@@ -175,17 +178,16 @@ done:
 
 int main(int argc, char** argv)
 {
+    int ret = 1;
     X509* cert = NULL;
     SSL_CTX* ctx = NULL;
     SSL* ssl = NULL;
     int serversocket = 0;
-    int ret = 1;
     char* server_name = NULL;
     char* server_port = NULL;
     int error = 0;
 
     printf("\nStarting" TLS_CLIENT "\n\n\n");
-
     if ((error = parse_arguments(argc, argv, &server_name, &server_port)) != 0)
     {
         printf(
@@ -208,12 +210,11 @@ int main(int argc, char** argv)
 
     if ((ctx = SSL_CTX_new(TLS_client_method())) == NULL)
     {
-        printf(TLS_CLIENT "TLS client: unable to create a new SSL context from "
-                          "TLS_client_method\n");
+        printf(TLS_CLIENT "TLS client: unable to create a new SSL context\n");
         goto done;
     }
 
-    // exclude SSLv2, SSLv3 ,TLS 1.0 and TLS 1.1
+    // choose TLSv1.2 by excluding SSLv2, SSLv3 ,TLS 1.0 and TLS 1.1
     SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
     SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv3);
     SSL_CTX_set_options(ctx, SSL_OP_NO_TLSv1);
@@ -268,19 +269,11 @@ int main(int argc, char** argv)
     if (serversocket != -1)
         close(serversocket);
 
-    if (ssl)
-        SSL_free(ssl);
-
-    if (cert)
-        X509_free(cert);
-
-    if (ctx)
-        SSL_CTX_free(ctx);
-
-    printf(TLS_CLIENT "Successfully established and communicated with server "
-                      "via attested TLS channel\n");
-
+    SSL_free(ssl);
+    X509_free(cert);
+    SSL_CTX_free(ctx);
     ret = 0;
 done:
+    printf(TLS_CLIENT " %s\n", (ret == 0) ? "success" : "failed");
     return (ret);
 }

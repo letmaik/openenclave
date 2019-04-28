@@ -63,31 +63,6 @@ done:
     return result;
 }
 
-// Compute the sha256 hash of given data.
-static int Sha256(const uint8_t* data, size_t data_size, uint8_t sha256[32])
-{
-    int ret = 0;
-    mbedtls_sha256_context ctx;
-
-    mbedtls_sha256_init(&ctx);
-
-    ret = mbedtls_sha256_starts_ret(&ctx, 0);
-    if (ret)
-        goto exit;
-
-    ret = mbedtls_sha256_update_ret(&ctx, data, data_size);
-    if (ret)
-        goto exit;
-
-    ret = mbedtls_sha256_finish_ret(&ctx, sha256);
-    if (ret)
-        goto exit;
-
-exit:
-    mbedtls_sha256_free(&ctx);
-    return ret;
-}
-
 // Consider to move this function into a shared directory
 oe_result_t generate_certificate_and_pkey(
     mbedtls_x509_crt* cert,
@@ -154,115 +129,10 @@ oe_result_t generate_certificate_and_pkey(
     }
 
 exit:
-    if (private_key_buf)
-        oe_free_key(private_key_buf, private_key_buf_size, NULL, 0);
-    if (public_key_buf)
-        oe_free_key(public_key_buf, public_key_buf_size, NULL, 0);
+    oe_free_key(private_key_buf, private_key_buf_size, NULL, 0);
+    oe_free_key(public_key_buf, public_key_buf_size, NULL, 0);
 
     if (output_cert)
         oe_free_x509cert_for_TLS(output_cert);
-    // free(output_cert);
     return result;
-}
-
-bool verify_mrsigner(
-    char* siging_public_key_buf,
-    size_t siging_public_key_buf_size,
-    uint8_t* signer_id_buf,
-    size_t signer_id_buf_size)
-{
-    mbedtls_pk_context ctx;
-    mbedtls_pk_type_t pk_type;
-    mbedtls_rsa_context* rsa_ctx = NULL;
-    uint8_t* modulus = NULL;
-    size_t modulus_size = 0;
-    int res = 0;
-    bool ret = false;
-    unsigned char* signer = NULL;
-
-    signer = (unsigned char*)malloc(signer_id_buf_size);
-    if (signer == NULL)
-    {
-        printf("Out of memory\n");
-        goto exit;
-    }
-
-    printf("Verify connecting client's identity\n");
-    printf("public key buffer size[%lu]\n", sizeof(siging_public_key_buf));
-    printf("public key\n[%s]\n", siging_public_key_buf);
-
-    mbedtls_pk_init(&ctx);
-    res = mbedtls_pk_parse_public_key(
-        &ctx,
-        (const unsigned char*)siging_public_key_buf,
-        siging_public_key_buf_size);
-    if (res != 0)
-    {
-        printf("mbedtls_pk_parse_public_key failed with %d\n", res);
-        goto exit;
-    }
-
-    pk_type = mbedtls_pk_get_type(&ctx);
-    if (pk_type != MBEDTLS_PK_RSA)
-    {
-        printf("mbedtls_pk_get_type had incorrect type: %d\n", res);
-        goto exit;
-    }
-    printf("This public sigining key is a rsa key \n");
-
-    rsa_ctx = mbedtls_pk_rsa(ctx);
-    modulus_size = mbedtls_rsa_get_len(rsa_ctx);
-    printf("modulus_size = [%zu]\n", modulus_size);
-    modulus = (uint8_t*)malloc(modulus_size);
-    if (modulus == NULL)
-    {
-        printf("malloc for modulus failed with size %zu:\n", modulus_size);
-        goto exit;
-    }
-
-    res = mbedtls_rsa_export_raw(
-        rsa_ctx, modulus, modulus_size, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
-    if (res != 0)
-    {
-        printf("mbedtls_rsa_export failed with %d\n", res);
-        goto exit;
-    }
-
-    // Reverse the modulus and compute sha256 on it.
-    for (size_t i = 0; i < modulus_size / 2; i++)
-    {
-        uint8_t tmp = modulus[i];
-        modulus[i] = modulus[modulus_size - 1 - i];
-        modulus[modulus_size - 1 - i] = tmp;
-    }
-
-    // Calculate the MRSIGNER value which is the SHA256 hash of the
-    // little endian representation of the public key modulus. This value
-    // is populated by the signer_id sub-field of a parsed oe_report_t's
-    // identity field.
-    if (Sha256(modulus, modulus_size, signer) != 0)
-    {
-        goto exit;
-    }
-
-    if (memcmp(signer, signer_id_buf, signer_id_buf_size) != 0)
-    {
-        printf("mrsigner is not equal!\n");
-        for (int i = 0; i < signer_id_buf_size; i++)
-        {
-            printf(
-                "0x%x - 0x%x\n", (uint8_t)signer[i], (uint8_t)signer_id_buf[i]);
-        }
-        goto exit;
-    }
-    ret = true;
-exit:
-    if (signer)
-        free(signer);
-
-    if (modulus != NULL)
-        free(modulus);
-
-    mbedtls_pk_free(&ctx);
-    return ret;
 }

@@ -85,13 +85,11 @@ int main(int argc, const char* argv[])
         printf(TLS_SERVER "Host: setup_tls_server failed\n");
         goto exit;
     }
-
 exit:
-
     printf(TLS_SERVER "Host: Terminating enclaves\n");
     if (enclave)
         terminate_enclave(enclave);
 
-    printf(TLS_SERVER "Host:  %s \n", (ret == 0) ? "succeeded" : "failed");
+    printf(TLS_SERVER "Host: %s\n", (ret == 0) ? "succeeded" : "failed");
     return ret;
 }

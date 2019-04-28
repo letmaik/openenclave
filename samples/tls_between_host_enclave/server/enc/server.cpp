@@ -20,10 +20,6 @@
 #include "../../common/common.h"
 #include "utility.h"
 
-oe_result_t enclave_identity_verifier_callback(
-    oe_identity_t* identity,
-    void* arg);
-
 extern "C"
 {
     int setup_tls_server(char* server_port);
@@ -51,50 +47,6 @@ static void my_debug(
 
     mbedtls_fprintf((FILE*)ctx, "%s:%04d: %s", file, line, str);
     fflush((FILE*)ctx);
-}
-
-// If set, the verify callback is called for each certificate in the chain.
-// The verification callback is supposed to return 0 on success. Otherwise, the
-// verification failed.
-static int cert_verify_callback(
-    void* data,
-    mbedtls_x509_crt* crt,
-    int depth,
-    uint32_t* flags)
-{
-    oe_result_t result = OE_FAILURE;
-    int ret = 1;
-    unsigned char* cert_buf = NULL;
-    size_t cert_size = 0;
-
-    (void)data;
-    (void)flags;
-
-    printf(TLS_SERVER "cert_verify_callback with depth = %d\n", depth);
-
-    cert_buf = crt->raw.p;
-    cert_size = crt->raw.len;
-
-    printf(
-        TLS_SERVER "crt->version = %d cert_size = %zu\n",
-        crt->version,
-        cert_size);
-
-    if (cert_size <= 0)
-        goto exit;
-
-    result = oe_verify_tls_cert(
-        cert_buf, cert_size, enclave_identity_verifier_callback, NULL);
-    if (result != OE_OK)
-    {
-        printf(
-            TLS_SERVER "oe_verify_tls_cert failed with result = %s\n",
-            oe_result_str(result));
-        goto exit;
-    }
-    ret = 0;
-exit:
-    return ret;
 }
 
 int configure_server_ssl(
@@ -138,7 +90,7 @@ int configure_server_ssl(
 
     // asked the client to optionally send the server a certificate
     mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
-    mbedtls_ssl_conf_verify(conf, cert_verify_callback, NULL);
+    // mbedtls_ssl_conf_verify(conf, cert_verify_callback, NULL);
     mbedtls_ssl_conf_ca_chain(conf, server_cert->next, NULL);
 
     if ((ret = mbedtls_ssl_conf_own_cert(conf, server_cert, pkey)) != 0)

@@ -3,17 +3,13 @@
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
-#include <openssl/pem.h>
-#include <openssl/rsa.h>
 #include <openssl/ssl.h>
-#include <openssl/x509.h>
-#include <openssl/x509_vfy.h>
 #include <string.h>
 #include "../common/common.h"
 #include "../common/tls_server_enc_pubkey.h"
 
 // Compute the sha256 hash of given data.
-static int Sha256(const uint8_t* data, size_t data_size, uint8_t sha256[32])
+static int Sha256(const uint8_t* data, size_t data_size, uint8_t* sha256)
 {
     int ret = 0;
     SHA256_CTX ctx;
@@ -38,8 +34,8 @@ done:
 bool verify_mrsigner_openssl(
     char* pem_key_buffer,
     size_t pem_key_buffer_len,
-    uint8_t* signer_id_buf,
-    size_t signer_id_buf_size)
+    uint8_t* expected_signer,
+    size_t expected_signer_size)
 {
     unsigned char* modulus = NULL;
     const BIGNUM* modulus_bn = NULL;
@@ -47,7 +43,7 @@ bool verify_mrsigner_openssl(
     size_t modulus_size = 0;
     int res = 0;
     bool ret = false;
-    unsigned char* hashed_mrsigner = NULL;
+    unsigned char* calculated_signer = NULL;
     BIO* bufio = NULL;
     RSA* rsa = NULL;
     int len = 0;
@@ -55,13 +51,13 @@ bool verify_mrsigner_openssl(
     int tmp_size = 0;
 
     printf(TLS_CLIENT "Verify connecting server's identity\n");
-    hashed_mrsigner = (unsigned char*)malloc(signer_id_buf_size);
-    if (hashed_mrsigner == NULL)
+    calculated_signer = (unsigned char*)malloc(expected_signer_size);
+    if (calculated_signer == NULL)
     {
         printf(TLS_CLIENT "Out of memory\n");
         goto done;
     }
-    printf(TLS_CLIENT "signer_id_buf_size=[%lu]\n", signer_id_buf_size);
+    printf(TLS_CLIENT "expected_signer_size=[%lu]\n", expected_signer_size);
     printf(TLS_CLIENT "public key buffer size[%lu]\n", pem_key_buffer_len);
     printf(TLS_CLIENT "public key\n[%s]\n", pem_key_buffer);
 
@@ -73,19 +69,32 @@ bool verify_mrsigner_openssl(
         printf(TLS_CLIENT "BIO_write error\n");
         goto done;
     }
-    // export rsa key
+    //
+    // export rsa key, read its modulus
+    //
     evp_key = PEM_read_bio_PUBKEY(bufio, NULL, NULL, NULL);
-    rsa = EVP_PKEY_get1_RSA(evp_key);
+    if (evp_key == NULL)
+    {
+        printf(TLS_CLIENT "PEM_read_bio_PUBKEY failed\n");
+        goto done;
+    }
 
+    rsa = EVP_PKEY_get1_RSA(evp_key);
+    if (rsa == NULL)
+    {
+        printf(TLS_CLIENT "EVP_PKEY_get1_RSA failed\n");
+        goto done;
+    }
     // retrieves the length of RSA modulus in bytes
     modulus_size = RSA_size(rsa);
     printf(TLS_CLIENT "modulus_size=%zu\n", modulus_size);
     RSA_get0_key(rsa, &modulus_bn, NULL, NULL);
     if (modulus_bn == NULL)
     {
-        // set error
+        printf(TLS_CLIENT "RSA_get0_key modulus_bn failed\n");
         goto done;
     }
+
     if (modulus_size != BN_num_bytes(modulus_bn))
     {
         printf(TLS_CLIENT "mismatched modulus size\n");
@@ -103,13 +112,11 @@ bool verify_mrsigner_openssl(
     if (tmp_size != modulus_size)
         goto done;
 
-    // for (int i=0; i<modulus_byte_count; i++)
-    // {
-    //     printf("modulus[%d]= 0x%x\n", i, modulus[i]);
-    // }
-
-    // (* MRSIGNER stores a SHA256 in little endian implemented natively on x86
-    // *) Reverse the modulus and compute sha256 on it.
+    // MRSIGNER stores a SHA256 in little endian implemented natively on x86
+    // Reverse the modulus and compute sha256 on it.
+    //
+    // Calculate the MRSIGNER value which is the SHA256 hash of the
+    // little endian representation of the public key modulus.
     for (size_t i = 0; i < modulus_size / 2; i++)
     {
         uint8_t tmp = modulus[i];
@@ -117,43 +124,30 @@ bool verify_mrsigner_openssl(
         modulus[modulus_size - 1 - i] = tmp;
     }
 
-    //
-    // Calculate the MRSIGNER value which is the SHA256 hash of the
-    // little endian representation of the public key modulus. This value
-    // is populated by the signer_id sub-field of a parsed oe_report_t's
-    // identity field.
-    if (Sha256((const uint8_t*)modulus, modulus_size, hashed_mrsigner) != 0)
+    if (Sha256((const uint8_t*)modulus, modulus_size, calculated_signer) != 0)
         goto done;
 
-    if (memcmp(hashed_mrsigner, signer_id_buf, signer_id_buf_size) != 0)
+    // validate against
+    if (memcmp(calculated_signer, expected_signer, expected_signer_size) != 0)
     {
         printf("mrsigner is not equal!\n");
-        for (int i = 0; i < signer_id_buf_size; i++)
+        for (int i = 0; i < expected_signer_size; i++)
         {
             printf(
                 "0x%x - 0x%x\n",
-                (uint8_t)signer_id_buf[i],
-                (uint8_t)hashed_mrsigner[i]);
+                (uint8_t)expected_signer[i],
+                (uint8_t)calculated_signer[i]);
         }
         goto done;
     }
     printf("signer id (MRSIGNER) was successfully validated\n");
     ret = true;
 done:
-    if (hashed_mrsigner)
-        free(hashed_mrsigner);
-
-    if (modulus != NULL)
-        free(modulus);
-
-    if (bufio)
-        BIO_free(bufio);
-
-    if (rsa)
-        RSA_free(rsa);
-
-    if (evp_key)
-        EVP_PKEY_free(evp_key);
+    free(calculated_signer);
+    free(modulus);
+    BIO_free(bufio);
+    RSA_free(rsa);
+    EVP_PKEY_free(evp_key);
 
     return ret;
 }

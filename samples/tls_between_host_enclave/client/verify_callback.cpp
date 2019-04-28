@@ -11,9 +11,6 @@
 #include <openenclave/host.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
-#include <openssl/pem.h>
-#include <openssl/ssl.h>
-#include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 #include "../common/common.h"
 #include "../common/tls_server_enc_pubkey.h"
@@ -21,12 +18,14 @@
 bool verify_mrsigner_openssl(
     char* pem_key_buffer,
     size_t pem_key_buffer_len,
-    uint8_t* signer_id_buf,
-    size_t signer_id_buf_size);
+    uint8_t* expected_signer,
+    size_t expected_signer_size);
 
 // This is the identity validation callback. An TLS connecting party (client or
 // server) can verify the passed in "identity" information to decide whether to
-// accept an connection reqest
+// accept the connection reqest from an tls server running inside a specific
+// enclave In a real app, custom identity validation should be done inside this
+// routine
 oe_result_t enclave_identity_verifier(oe_identity_t* identity, void* arg)
 {
     oe_result_t result = OE_VERIFY_FAILED;
@@ -35,25 +34,21 @@ oe_result_t enclave_identity_verifier(oe_identity_t* identity, void* arg)
     printf(TLS_CLIENT
            "enclave_identity_verifier is called with parsed report:\n");
 
-    // Check the enclave's security version
+    // Dump an identity information: unique ID, signer ID and Product ID
+    // They are MRENCLAVE, MRSIGNER and ISVPRODID for SGX enclaves.
     printf(
         TLS_CLIENT "identity.security_version = %d\n",
         identity->security_version);
-    if (identity->security_version < 1)
-    {
-        printf(
-            TLS_CLIENT "identity.security_version check failed (%d)\n",
-            identity->security_version);
-        goto done;
-    }
 
-    // Dump an enclave's unique ID, signer ID and Product ID. They are
-    // MRENCLAVE, MRSIGNER and ISVPRODID for SGX enclaves.  In a real scenario,
-    // custom id checking should be done here
     printf(TLS_CLIENT "identity->unique_id : ");
     for (int i = 0; i < OE_UNIQUE_ID_SIZE; i++)
         printf("0x%0x ", (uint8_t)identity->unique_id[i]);
 
+    printf("\n");
+
+    printf(TLS_CLIENT "identity->product_id : ");
+    for (int i = 0; i < OE_PRODUCT_ID_SIZE; i++)
+        printf("0x%0x ", (uint8_t)identity->product_id[i]);
     printf("\n");
 
     printf(TLS_CLIENT "identity->signer_id : ");
@@ -61,6 +56,7 @@ oe_result_t enclave_identity_verifier(oe_identity_t* identity, void* arg)
         printf("0x%0x ", (uint8_t)identity->signer_id[i]);
     printf("\n");
 
+    // In this sample, only signer_id validation is shown
     if (!verify_mrsigner_openssl(
             (char*)OTHER_ENCLAVE_PUBLIC_KEY,
             sizeof(OTHER_ENCLAVE_PUBLIC_KEY),
@@ -70,11 +66,6 @@ oe_result_t enclave_identity_verifier(oe_identity_t* identity, void* arg)
         printf("failed:mrsigner not equal!\n");
         goto done;
     }
-
-    printf(TLS_CLIENT "identity->product_id : ");
-    for (int i = 0; i < OE_PRODUCT_ID_SIZE; i++)
-        printf("0x%0x ", (uint8_t)identity->product_id[i]);
-    printf("\n");
 
     printf(TLS_CLIENT "enclave_identity_verifier returned success\n");
     result = OE_OK;
