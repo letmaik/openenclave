@@ -756,7 +756,7 @@ oe_result_t oe_gen_cert_for_tls(
  * Free the given cert
  * @param cert If not NULL, the buffer to free.
  */
-void oe_free_x509cert_for_TLS(uint8_t* cert);
+void oe_free_tls_cert(uint8_t* cert);
 
 /**
  * oe_verify_tls_cert

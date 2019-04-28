@@ -312,8 +312,11 @@ done:
     return result;
 }
 
-void oe_free_x509cert_for_TLS(uint8_t* cert)
+void oe_free_tls_cert(uint8_t* cert)
 {
-    OE_TRACE_VERBOSE("Calling oe_free_x509cert_for_TLS cert=0x%p", cert);
-    oe_free(cert);
+    if (cert)
+    {
+        OE_TRACE_VERBOSE("Calling oe_free_tls_cert=0x%p", cert);
+        oe_free(cert);
+    }
 }

@@ -154,14 +154,9 @@ oe_result_t generate_certificate_and_pkey(
     }
 
 exit:
-    if (private_key_buf)
-        oe_free_key(private_key_buf, private_key_buf_size, NULL, 0);
-    if (public_key_buf)
-        oe_free_key(public_key_buf, public_key_buf_size, NULL, 0);
-
-    if (output_cert)
-        oe_free_x509cert_for_TLS(output_cert);
-    // free(output_cert);
+    oe_free_key(private_key_buf, private_key_buf_size, NULL, 0);
+    oe_free_key(public_key_buf, public_key_buf_size, NULL, 0);
+    oe_free_tls_cert(output_cert);
     return result;
 }
 
