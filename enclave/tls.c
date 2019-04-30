@@ -37,7 +37,7 @@
 static unsigned char _cert_buf[MAX_CERT_SIZE] = {
     0,
 };
-static unsigned char oid_oe_report[] = X509_OID_FOR_QUOTE_EXT;
+static const unsigned char oid_oe_report[] = X509_OID_FOR_QUOTE_EXT;
 
 oe_result_t calc_sha256(uint8_t* buf, size_t buf_size, OE_SHA256* sha256)
 {
@@ -229,9 +229,7 @@ done:
     mbedtls_ctr_drbg_free(&ctr_drbg);
     mbedtls_pk_free(&issuer_key);
     mbedtls_pk_free(&subject_key);
-
-    if (remote_report_buf)
-        oe_free_report(remote_report_buf);
+    oe_free_report(remote_report_buf);
 
     if (ret)
     {
@@ -281,7 +279,7 @@ done:
     return result;
 }
 
-oe_result_t oe_gen_cert_for_tls(
+oe_result_t oe_gen_tls_cert(
     uint8_t* issuer_key,
     size_t issuer_key_size,
     uint8_t* subject_key,
@@ -291,7 +289,7 @@ oe_result_t oe_gen_cert_for_tls(
 {
     oe_result_t result = OE_FAILURE;
 
-    OE_TRACE_VERBOSE("Calling oe_gen_cert_for_tls");
+    OE_TRACE_VERBOSE("Calling oe_gen_tls_cert");
     OE_TRACE_VERBOSE("subject_key key =\n[%s]\n", subject_key);
 
     // generate cert

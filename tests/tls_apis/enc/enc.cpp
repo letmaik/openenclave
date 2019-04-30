@@ -122,7 +122,7 @@ oe_result_t get_TLS_cert(unsigned char** cert, size_t* cert_size)
     OE_TRACE_INFO("private key:[%s]\n", private_key);
     OE_TRACE_INFO("public key:[%s]\n", public_key);
 
-    result = oe_gen_cert_for_tls(
+    result = oe_gen_tls_cert(
         private_key,
         private_key_size,
         public_key,

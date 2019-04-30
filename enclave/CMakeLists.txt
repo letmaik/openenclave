@@ -9,6 +9,7 @@ if (OE_SGX)
         ../common/sgx/revocation.c
         ../common/sgx/sgxcertextensions.c
         ../common/sgx/tcbinfo.c
+        ../common/sgx/tlsverifier.c
         sgx/link.c
         sgx/qeidinfo.c
         sgx/report.c
@@ -36,7 +37,6 @@ add_library(oeenclave STATIC
     rsa.c
     sha.c
     tls.c
-    tlsverifiere.c
     ${PLATFORM_SRC})
 
 maybe_build_using_clangw(oeenclave)

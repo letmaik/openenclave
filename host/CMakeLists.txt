@@ -56,6 +56,7 @@ if (OE_SGX)
     ../common/sgx/revocation.c
     ../common/sgx/sgxcertextensions.c
     ../common/sgx/tcbinfo.c
+    ../common/sgx/tlsverifier.c
     sgx/calls.c
     sgx/create.c
     sgx/elf.c
@@ -86,7 +87,6 @@ if (OE_SGX)
       sgx/linux/exception.c
       sgx/linux/sgxioctl.c
       sgx/linux/sgxquoteprovider.c
-      sgx/tlsverifierh.c
       sgx/linux/xstate.c)
   else()
     list(APPEND PLATFORM_SRC

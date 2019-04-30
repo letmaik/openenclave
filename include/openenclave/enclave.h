@@ -729,7 +729,7 @@ oe_enclave_t* oe_get_enclave(void);
 oe_result_t oe_random(void* data, size_t size);
 
 /**
- * oe_gen_cert_for_tls.
+ * oe_gen_tls_cert.
  *
  * This function generates a self-signed certificate with an embedded quote from
  * the underlying enclave.
@@ -745,7 +745,7 @@ oe_result_t oe_random(void* data, size_t size);
  *
  * @return OE_OK on success
  */
-oe_result_t oe_gen_cert_for_tls(
+oe_result_t oe_gen_tls_cert(
     uint8_t* issuer_key,
     size_t issuer_key_size,
     uint8_t* subject_key,

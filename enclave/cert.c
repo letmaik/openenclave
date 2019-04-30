@@ -634,6 +634,55 @@ done:
     return result;
 }
 
+oe_result_t oe_cert_read_der(
+    oe_cert_t* cert,
+    const void* der_data,
+    size_t der_size)
+{
+    oe_result_t result = OE_UNEXPECTED;
+    Cert* impl = (Cert*)cert;
+    mbedtls_x509_crt* crt = NULL;
+    int rc = 0;
+
+    /* Clear the implementation */
+    if (impl)
+        memset(impl, 0, sizeof(Cert));
+
+    /* Check parameters */
+    if (!der_data || !der_size || !cert)
+        OE_RAISE(OE_INVALID_PARAMETER);
+
+    /* Allocate memory for the certificate */
+    if (!(crt = mbedtls_calloc(1, sizeof(mbedtls_x509_crt))))
+        OE_RAISE(OE_OUT_OF_MEMORY);
+
+    /* Initialize the certificate structure */
+    mbedtls_x509_crt_init(crt);
+
+    /* Parse a single DER formatted certificate and add it to the chained list
+     */
+    rc = mbedtls_x509_crt_parse_der(crt, (const uint8_t*)der_data, der_size);
+    if (rc != 0)
+        OE_RAISE(OE_FAILURE, "mbedtls_x509_crt_parse rc= 0x%x\n", rc);
+
+    /* Initialize the implementation */
+    _cert_init(impl, crt, NULL);
+    crt = NULL;
+
+    result = OE_OK;
+
+done:
+
+    if (crt)
+    {
+        mbedtls_x509_crt_free(crt);
+        memset(crt, 0, sizeof(mbedtls_x509_crt));
+        mbedtls_free(crt);
+    }
+
+    return result;
+}
+
 oe_result_t oe_cert_free(oe_cert_t* cert)
 {
     oe_result_t result = OE_UNEXPECTED;
@@ -867,6 +916,44 @@ done:
         }
     }
 
+    return result;
+}
+
+oe_result_t oe_verify_self_signed_cert(
+    oe_cert_t* cert,
+    oe_verify_cert_error_t* error)
+{
+    oe_result_t result = OE_VERIFY_FAILED;
+    Cert* cert_impl = (Cert*)cert;
+    uint32_t flags = 0;
+    int ret = 0;
+
+    /* Initialize error */
+    if (error)
+        *error->buf = '\0';
+
+    /* Reject invalid certificate */
+    if (!_cert_is_valid(cert_impl))
+    {
+        _set_err(error, "invalid cert parameter");
+        OE_RAISE(OE_INVALID_PARAMETER);
+    }
+
+    // get pubic key and verify this signature
+    ret = mbedtls_x509_crt_verify(
+        cert_impl->cert, cert_impl->cert, NULL, NULL, &flags, NULL, NULL);
+    if (ret)
+    {
+        oe_verify_cert_error_t error;
+        mbedtls_x509_crt_verify_info(error.buf, sizeof(error.buf), "", flags);
+        OE_RAISE_MSG(
+            OE_FAILURE,
+            "mbedtls_x509_crt_verify failed with %s (flags=0x%x)",
+            error.buf,
+            flags);
+    }
+    result = OE_OK;
+done:
     return result;
 }
 

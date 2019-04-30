@@ -57,6 +57,25 @@ oe_result_t oe_cert_read_pem(
     size_t pem_size);
 
 /**
+ * Read a certificate from DER format
+ *
+ * This function reads a certificate from DER data
+ *
+ * The caller is responsible for releasing the certificate by passing it to
+ * oe_cert_free().
+ *
+ * @param cert initialized certificate handle upon return
+ * @param der_data DER data
+ * @param der_size size of the DER data
+ *
+ * @return OE_OK load was successful
+ */
+oe_result_t oe_cert_read_der(
+    oe_cert_t* cert,
+    const void* der_data,
+    size_t der_size);
+
+/**
  * Read a certificate chain from PEM format.
  *
  * This function reads a certificate chain from PEM data with the following PEM
@@ -132,6 +151,22 @@ oe_result_t oe_cert_verify(
     oe_cert_chain_t* chain,
     const oe_crl_t* const* crls,
     size_t num_crls,
+    oe_verify_cert_error_t* error);
+
+/**
+ * Verify a self-signed certificate's signature
+ *
+ *
+ * @param cert verify this certificate
+ * @param error Optional. Holds the error message if this function failed.
+ *
+ * @return OE_OK verify ok
+ * @return OE_VERIFY_FAILED
+ * @return OE_INVALID_PARAMETER
+ * @return OE_FAILURE
+ */
+oe_result_t oe_verify_self_signed_cert(
+    oe_cert_t* cert,
     oe_verify_cert_error_t* error);
 
 /**
