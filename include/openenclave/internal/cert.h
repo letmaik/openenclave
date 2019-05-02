@@ -349,6 +349,32 @@ oe_result_t oe_get_crl_distribution_points(
     uint8_t* buffer,
     size_t* buffer_size);
 
+#ifdef _OE_ENCLAVE_H
+// TODO: add comments
+typedef struct _oe_cert_config
+{
+    uint8_t* issuer_key_buf;
+    size_t issuer_key_buf_size;
+    uint8_t* subject_key_buf;
+    size_t subject_key_buf_size;
+    unsigned char* subject_name;
+    unsigned char* issuer_name;
+    unsigned char* date_not_valid_before;
+    unsigned char* date_not_valid_after;
+    uint8_t* ext_data_buf;
+    size_t ext_data_buf_size;
+    char* ext_oid;
+    size_t ext_oid_size;
+} oe_cert_config_t;
+
+#define MAX_CERT_SIZE 8 * 1024
+oe_result_t oe_gen_custom_x509_cert(
+    oe_cert_config_t* cert_config,
+    unsigned char* _cert_buf,
+    size_t* bytes_written);
+
+#endif
+
 OE_EXTERNC_END
 
 #endif /* _OE_CERT_H */
