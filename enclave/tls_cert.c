@@ -22,17 +22,7 @@
 #include "key.h"
 #include "rsa.h"
 
-#include <mbedtls/certs.h>
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/debug.h>
-#include <mbedtls/entropy.h>
-#include <mbedtls/error.h>
-#include <mbedtls/oid.h>
-#include <mbedtls/sha256.h>
-#include <mbedtls/ssl.h>
-#include <mbedtls/x509.h>
-#include <mbedtls/x509_crt.h>
-
+// Todo: consider set CN with enclave's MRENCLAVE values
 #define ISSUER_NAME "CN=Open Enclave SDK,O=OESDK TLS,C=UK"
 #define SUBJECT_NAME ISSUER_NAME
 #define DATE_NOT_VALID_BEFORE "20190501000000"
@@ -54,9 +44,6 @@ oe_result_t calc_sha256(uint8_t* buf, size_t buf_size, OE_SHA256* sha256)
     OE_CHECK(oe_sha256_update(&sha256_ctx, buf, buf_size));
     OE_CHECK(oe_sha256_final(&sha256_ctx, sha256));
 
-    for (size_t i = 0; i < OE_SHA256_SIZE; i++)
-        OE_TRACE_VERBOSE("sha256[%d]=0x%x", i, sha256->buf[i]);
-
     result = OE_OK;
 done:
     return result;
@@ -76,7 +63,6 @@ oe_result_t generate_x509_cert(
     size_t* output_cert_size)
 {
     oe_result_t result = OE_FAILURE;
-    int ret = 0;
     size_t bytes_written = 0;
     uint8_t* host_cert_buf = NULL;
     oe_cert_config_t config = {0};
@@ -94,32 +80,31 @@ oe_result_t generate_x509_cert(
     config.ext_oid = (char*)oid_oe_report;
     config.ext_oid_size = sizeof(oid_oe_report);
 
-    result = oe_gen_custom_x509_cert(&config, _cert_buf, &bytes_written);
+    result = oe_gen_custom_x509_cert(
+        &config, _cert_buf, MAX_CERT_SIZE, &bytes_written);
     OE_CHECK_MSG(
         result,
         "oe_gen_custom_x509_cert failed with %s",
         oe_result_str(result));
-    OE_TRACE_VERBOSE("bytes_written = 0x%x", bytes_written);
+    OE_TRACE_VERBOSE("certificate: bytes_written = 0x%x", bytes_written);
 
     // allocate memory for cert output buffer
     host_cert_buf = (uint8_t*)oe_malloc(bytes_written);
     if (host_cert_buf == NULL)
         goto done;
+
     // copy to host buffer
     oe_memcpy_s(
         (void*)host_cert_buf,
         bytes_written,
-        (const void*)(_cert_buf + sizeof(_cert_buf) - bytes_written),
+        //        (const void*)(_cert_buf + sizeof(_cert_buf) - bytes_written),
+        (const void*)_cert_buf,
         bytes_written);
 
     *output_cert_size = (size_t)bytes_written;
     *output_cert = host_cert_buf;
     result = OE_OK;
 done:
-    if (ret)
-    {
-        result = OE_FAILURE;
-    }
     return result;
 }
 
@@ -178,10 +163,12 @@ oe_result_t oe_gen_tls_cert(
     size_t remote_report_buf_size = OE_MAX_REPORT_SIZE;
 
     OE_TRACE_VERBOSE("Calling oe_gen_tls_cert");
-    OE_TRACE_VERBOSE("subject_key key =\n[%s]\n", subject_key);
 
-    // generate quote with hash(cert's subject key) as report data
-    OE_TRACE_VERBOSE("subject_key_size=%d", subject_key_size);
+    // generate quote with hash(cert's subject key) and set it as report data
+    OE_TRACE_VERBOSE(
+        "subject_key_size=%d subject_key key =\n[%s]\n",
+        subject_key_size,
+        subject_key);
     calc_sha256(subject_key, subject_key_size, &sha256);
     OE_TRACE_VERBOSE("Report data with hash of public key:");
     for (size_t i = 0; i < OE_SHA256_SIZE; i++)
@@ -199,7 +186,7 @@ oe_result_t oe_gen_tls_cert(
     OE_CHECK_MSG(
         result, "oe_get_report failed with %s\n", oe_result_str(result));
 
-    OE_CHECK(generate_x509_cert(
+    result = generate_x509_cert(
         issuer_key,
         issuer_key_size,
         subject_key,
@@ -207,11 +194,11 @@ oe_result_t oe_gen_tls_cert(
         remote_report_buf,
         remote_report_buf_size,
         output_cert,
-        output_cert_size));
-    OE_TRACE_VERBOSE(
-        "generate_x509_cert succeeded. cert_buf = 0x%p cert_size = %d",
-        output_cert,
-        *output_cert_size);
+        output_cert_size);
+    OE_CHECK_MSG(
+        result, "generate_x509_cert failed : %s", oe_result_str(result));
+
+    OE_TRACE_VERBOSE("self-signed certificat size = %d", *output_cert_size);
     result = OE_OK;
 done:
     oe_free_report(remote_report_buf);
