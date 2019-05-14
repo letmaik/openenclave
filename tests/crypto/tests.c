@@ -5,13 +5,13 @@
 
 void TestAll()
 {
-    TestASN1();
-    TestCRL();
-    TestEC();
-    TestRandom();
-    TestRdrand();
+    // TestASN1();
+    // TestCRL();
+    // TestEC();
+    // TestRandom();
+    // TestRdrand();
     TestRSA();
-    TestHMAC();
-    TestKDF();
-    TestSHA();
+    // TestHMAC();
+    // TestKDF();
+    // TestSHA();
 }

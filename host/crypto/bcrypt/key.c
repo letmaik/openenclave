@@ -7,6 +7,7 @@
 #include <openenclave/internal/utils.h>
 //#include <string.h>
 //#include "init.h"
+#include <bcrypt.h>
 
 bool oe_bcrypt_key_is_valid(const oe_bcrypt_key_t* impl, uint64_t magic)
 {
@@ -33,6 +34,65 @@ oe_result_t oe_bcrypt_key_free(oe_bcrypt_key_t* key, uint64_t magic)
     result = OE_OK;
 
 done:
+    return result;
+}
+
+oe_result_t oe_bcrypt_key_get_blob(
+    oe_bcrypt_key_t* key,
+    uint64_t magic,
+    LPCWSTR blob_type,
+    ULONG** blob_data,
+    ULONG* blob_size)
+{
+    oe_result_t result = OE_UNEXPECTED;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
+    ULONG export_size = 0;
+    ULONG output_size = 0;
+    ULONG* export_data = NULL;
+
+    if (blob_data)
+        *blob_data = NULL;
+
+    if (blob_size)
+        *blob_size = 0;
+
+    /* Check parameter */
+    if (!oe_bcrypt_key_is_valid(key, magic))
+        OE_RAISE(OE_INVALID_PARAMETER);
+
+    status =
+        BCryptExportKey(key->pkey, NULL, blob_type, NULL, 0, &export_size, 0);
+    if (!BCRYPT_SUCCESS(status))
+        OE_RAISE_MSG(
+            OE_CRYPTO_ERROR, "BCryptExportKey failed, err=%#x\n", status);
+
+    export_data = malloc(export_size);
+    if (!export_data)
+        OE_RAISE(OE_OUT_OF_MEMORY);
+
+    status = BCryptExportKey(
+        key->pkey, NULL, blob_type, export_data, export_size, &output_size, 0);
+    if (!BCRYPT_SUCCESS(status))
+        OE_RAISE_MSG(
+            OE_CRYPTO_ERROR, "BCryptExportKey failed, err=%#x\n", status);
+
+    if (output_size != export_size)
+        OE_RAISE_MSG(
+            OE_UNEXPECTED,
+            "BCryptExportKey wrote:%#x bytes, expected:%#x bytes\n",
+            output_size,
+            export_size);
+
+    *blob_size = export_size;
+    *blob_data = export_data;
+    export_data = NULL;
+
+    result = OE_OK;
+
+done:
+    if (export_data)
+        free(export_data);
+
     return result;
 }
 
@@ -121,6 +181,9 @@ oe_result_t oe_bcrypt_read_key_pem(
     DWORD rsa_blob_size = 0;
     BCRYPT_KEY_HANDLE handle = NULL;
 
+    uint8_t* x509_key_blob = NULL;
+    DWORD x509_key_blob_size = 0;
+
     if (!key || !pem_data)
         OE_RAISE(OE_INVALID_PARAMETER);
 
@@ -128,6 +191,44 @@ oe_result_t oe_bcrypt_read_key_pem(
     OE_CHECK(_rsa_pem_to_der(pem_data, pem_size, &der_data, &der_size));
 
     /* Step 2: Decode DER to Crypt object. */
+    // TODO: split this into separate codepaths as needed
+    if (key_args.input_type == X509_PUBLIC_KEY_INFO)
+    {
+        BOOL success = CryptDecodeObjectEx(
+            X509_ASN_ENCODING,
+            X509_PUBLIC_KEY_INFO,
+            der_data,
+            der_size,
+            CRYPT_DECODE_ALLOC_FLAG | CRYPT_DECODE_NOCOPY_FLAG,
+            NULL,
+            &x509_key_blob,
+            &x509_key_blob_size);
+
+        if (!success)
+            OE_RAISE_MSG(
+                OE_CRYPTO_ERROR,
+                "CryptDecodeObjectEx failed (err=%#x)\n",
+                GetLastError());
+
+        PCERT_PUBLIC_KEY_INFO keyinfo = (PCERT_PUBLIC_KEY_INFO)x509_key_blob;
+
+        success = CryptDecodeObjectEx(
+            X509_ASN_ENCODING,
+            CNG_RSA_PUBLIC_KEY_BLOB,
+            keyinfo->PublicKey.pbData,
+            keyinfo->PublicKey.cbData,
+            CRYPT_DECODE_ALLOC_FLAG | CRYPT_DECODE_NOCOPY_FLAG,
+            NULL,
+            &rsa_blob,
+            &rsa_blob_size);
+
+        if (!success)
+            OE_RAISE_MSG(
+                OE_CRYPTO_ERROR,
+                "CryptDecodeObjectEx failed (err=%#x)\n",
+                GetLastError());
+    }
+    else
     {
         BOOL success = CryptDecodeObjectEx(
             X509_ASN_ENCODING,
@@ -166,7 +267,6 @@ oe_result_t oe_bcrypt_read_key_pem(
 
     /* Step 4: Convery BCrypt Handle to OE type. */
     {
-        // oe_private_key_t* pkey = (oe_private_key_t*)private_key;
         key->magic = magic;
         key->pkey = handle;
         handle = NULL;
@@ -190,6 +290,13 @@ done:
         rsa_blob_size = 0;
     }
 
+    if (x509_key_blob)
+    {
+        oe_secure_zero_fill(x509_key_blob, x509_key_blob_size);
+        LocalFree(x509_key_blob);
+        x509_key_blob_size = 0;
+    }
+
     if (der_data)
     {
         oe_secure_zero_fill(der_data, der_size);
@@ -200,16 +307,16 @@ done:
     return result;
 }
 
-// void oe_public_key_init(
-//    oe_public_key_t* public_key,
-//    EVP_PKEY* pkey,
-//    uint64_t magic)
-//{
-//    oe_public_key_t* impl = (oe_public_key_t*)public_key;
-//    impl->magic = magic;
-//    impl->pkey = pkey;
-//}
-//
+void oe_public_key_init(
+    oe_public_key_t* public_key,
+    BCRYPT_KEY_HANDLE* pkey,
+    uint64_t magic)
+{
+    oe_public_key_t* impl = (oe_public_key_t*)public_key;
+    impl->magic = magic;
+    impl->pkey = pkey;
+}
+
 // void oe_private_key_init(
 //    oe_private_key_t* private_key,
 //    EVP_PKEY* pkey,

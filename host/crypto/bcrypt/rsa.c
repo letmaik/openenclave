@@ -26,10 +26,10 @@ static const oe_bcrypt_read_key_args_t _PRIVATE_RSA_KEY_ARGS = {
     BCRYPT_RSA_ALG_HANDLE,
     BCRYPT_RSAPRIVATE_BLOB};
 
-// static const oe_bcrypt_read_key_args_t _PUBLIC_RSA_KEY_ARGS = {
-//    CNG_RSA_PUBLIC_KEY_BLOB,
-//    BCRYPT_RSA_ALG_HANDLE,
-//    BCRYPT_RSAPUBLIC_BLOB};
+static const oe_bcrypt_read_key_args_t _PUBLIC_RSA_KEY_ARGS = {
+    X509_PUBLIC_KEY_INFO,
+    BCRYPT_RSA_ALG_HANDLE,
+    BCRYPT_RSAPUBLIC_BLOB};
 
 static oe_result_t _get_public_rsa_blob_info(
     BCRYPT_KEY_HANDLE key,
@@ -88,6 +88,14 @@ done:
     return result;
 }
 
+void oe_rsa_public_key_init(
+    oe_rsa_public_key_t* public_key,
+    BCRYPT_KEY_HANDLE* pkey)
+{
+    return oe_public_key_init(
+        (oe_public_key_t*)public_key, pkey, _PUBLIC_KEY_MAGIC);
+}
+
 oe_result_t oe_rsa_private_key_read_pem(
     oe_rsa_private_key_t* private_key,
     const uint8_t* pem_data,
@@ -122,13 +130,12 @@ oe_result_t oe_rsa_public_key_read_pem(
     const uint8_t* pem_data,
     size_t pem_size)
 {
-    return OE_UNSUPPORTED;
-    //    return oe_public_key_read_pem(
-    //        pem_data,
-    //        pem_size,
-    //        (oe_public_key_t*)public_key,
-    //        EVP_PKEY_RSA,
-    //        _PUBLIC_KEY_MAGIC);
+    return oe_bcrypt_read_key_pem(
+        pem_data,
+        pem_size,
+        public_key,
+        _PUBLIC_RSA_KEY_ARGS,
+        _PUBLIC_KEY_MAGIC);
 }
 
 /* Used by tests/crypto/rsa_tests */
@@ -271,6 +278,8 @@ oe_result_t oe_rsa_public_key_verify(
 }
 
 /* Used by tests/crypto/rsa_tests */
+// ATTN: BCrypt does not support arbitrary modulus values in key
+// generation, cannot be supported
 oe_result_t oe_rsa_generate_key_pair(
     uint64_t bits,
     uint64_t exponent,
@@ -278,11 +287,22 @@ oe_result_t oe_rsa_generate_key_pair(
     oe_rsa_public_key_t* public_key)
 {
     return OE_UNSUPPORTED;
-    //    return _generate_key_pair(
-    //        bits,
-    //        exponent,
-    //        (oe_private_key_t*)private_key,
-    //        (oe_public_key_t*)public_key);
+    //    oe_result_t result = OE_UNEXPECTED;
+    //    BCRYPT_ALG_HANDLE rsa_handle = NULL;
+    //    BCRYPT_KEY_HANDLE key = NULL;
+    //    NTSTATUS status =
+    //        BCryptOpenAlgorithmProvider(&rsa_handle, BCRYPT_RSA_ALGORITHM,
+    //        NULL, 0);
+    //    if (!BCRYPT_SUCCESS(status))
+    //        OE_RAISE_MSG(
+    //            OE_CRYPTO_ERROR,
+    //            "BCryptOpenAlgorithmProvider failed, err=%#x",
+    //            status);
+    //
+    //    status = BCryptGenerateKeyPair(rsa_handle, &key, bits, 0);
+    //
+    // done:
+    //    return result;
 }
 
 oe_result_t oe_rsa_public_key_get_modulus(
@@ -404,9 +424,57 @@ oe_result_t oe_rsa_public_key_equal(
     const oe_rsa_public_key_t* public_key2,
     bool* equal)
 {
-    return OE_UNSUPPORTED;
-    // return _public_key_equal(
-    //    (oe_public_key_t*)public_key1, (oe_public_key_t*)public_key2, equal);
+    oe_result_t result = OE_UNEXPECTED;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
+
+    /* key1 and key2 are both BCRYPT_RSAKEY_BLOB structures
+     * which should be comparable as raw byte buffers.
+     */
+    ULONG* key1 = NULL;
+    ULONG* key2 = NULL;
+    ULONG key1_size = 0;
+    ULONG key2_size = 0;
+    ULONG* foo = &key1_size;
+    if (!foo)
+        goto done;
+
+    if (equal)
+        *equal = false;
+    else
+        OE_RAISE(OE_INVALID_PARAMETER);
+
+    OE_CHECK(oe_bcrypt_key_get_blob(
+        (oe_bcrypt_key_t*)public_key1,
+        _PUBLIC_KEY_MAGIC,
+        BCRYPT_RSAPUBLIC_BLOB,
+        &key1,
+        &key1_size));
+
+    OE_CHECK(oe_bcrypt_key_get_blob(
+        (oe_bcrypt_key_t*)public_key2,
+        _PUBLIC_KEY_MAGIC,
+        BCRYPT_RSAPUBLIC_BLOB,
+        &key2,
+        &key2_size));
+
+    if (key1_size == key2_size & memcmp(key1, key2, key1_size) == 0)
+        *equal = true;
+
+    result = OE_OK;
+
+done:
+    if (key1)
+    {
+        oe_secure_zero_fill((ULONG*)key1, key1_size);
+        free(key1);
+    }
+
+    if (key2)
+    {
+        oe_secure_zero_fill((ULONG*)key2, key2_size);
+        free(key2);
+    }
+    return result;
 }
 
 oe_result_t oe_rsa_get_public_key_from_private(
