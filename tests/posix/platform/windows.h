@@ -127,7 +127,9 @@ OE_INLINE int thread_create(
 
 OE_INLINE int thread_join(thread_t thread)
 {
-    if (WaitForSingleObject(thread.__impl, INFINITE) == WAIT_OBJECT_0)
+    const DWORD TIMEOUT_MSEC = 30000;
+
+    if (WaitForSingleObject(thread.__impl, TIMEOUT_MSEC) == WAIT_OBJECT_0)
         return 0;
 
     return -1;
