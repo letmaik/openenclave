@@ -35,16 +35,6 @@
 /* Randomly generated magic number */
 #define OE_CERT_MAGIC 0xbc8e184285de4d2a
 
-static void _set_err(oe_verify_cert_error_t* error, const char* str)
-{
-    if (error)
-    {
-        error->buf[0] = '\0';
-        oe_strncat_s(
-            error->buf, sizeof(error->buf), str, sizeof(error->buf) - 1);
-    }
-}
-
 typedef struct _cert
 {
     uint64_t magic;
@@ -230,16 +220,6 @@ static int X509_up_ref(X509* x509)
     return 1;
 }
 
-/* Needed because some versions of OpenSSL do not support X509_CRL_up_ref() */
-static int X509_CRL_up_ref(X509_CRL* x509_crl)
-{
-    if (!x509_crl)
-        return 0;
-
-    CRYPTO_add(&x509_crl->references, 1, CRYPTO_LOCK_X509_CRL);
-    return 1;
-}
-
 static const STACK_OF(X509_EXTENSION) * X509_get0_extensions(const X509* x)
 {
     if (!x->cert_info)
@@ -259,7 +239,7 @@ static oe_result_t _cert_chain_get_length(const CertChain* impl, int* length)
     *length = 0;
 
     if ((num = sk_X509_num(impl->sk)) <= 0)
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_CRYPTO_ERROR);
 
     *length = num;
 
@@ -294,48 +274,112 @@ static STACK_OF(X509) * _clone_chain(STACK_OF(X509) * chain)
     return sk;
 }
 
-static oe_result_t _verify_cert(X509* cert_, STACK_OF(X509) * chain_)
+static oe_result_t _verify_cert(
+    X509* cert,
+    STACK_OF(X509) * chain_,
+    const oe_crl_t* const* crls,
+    size_t num_crls)
 {
     oe_result_t result = OE_UNEXPECTED;
     X509_STORE_CTX* ctx = NULL;
-    X509* cert = NULL;
+    X509_STORE* store = NULL;
+    X509* x509 = NULL;
     STACK_OF(X509)* chain = NULL;
 
     /* Clone the certificate to clear any cached verification state */
-    if (!(cert = _clone_x509(cert_)))
-        OE_RAISE(OE_FAILURE);
+    if (!(x509 = _clone_x509(cert)))
+        OE_RAISE_MSG(OE_FAILURE, "Failed to clone X509 cert", NULL);
 
     /* Clone the chain to clear any cached verification state */
-    if (!(chain = _clone_chain(chain_)))
-        OE_RAISE(OE_FAILURE);
+    if (chain_ && !(chain = _clone_chain(chain_)))
+        OE_RAISE_MSG(OE_FAILURE, "Failed to clone X509 cert chain", NULL);
+
+    /* Create a store for the verification */
+    if (!(store = X509_STORE_new()))
+        OE_RAISE_MSG(OE_CRYPTO_ERROR, "Failed to allocate X509 store", NULL);
 
     /* Create a context for verification */
     if (!(ctx = X509_STORE_CTX_new()))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE_MSG(
+            OE_CRYPTO_ERROR, "Failed to create new X509 context", NULL);
 
     /* Initialize the context that will be used to verify the certificate */
-    if (!X509_STORE_CTX_init(ctx, NULL, NULL, NULL))
-        OE_RAISE(OE_FAILURE);
+    if (!X509_STORE_CTX_init(ctx, store, NULL, NULL))
+    {
+        OE_RAISE_MSG(
+            OE_CRYPTO_ERROR, "Failed to initialize X509 context", NULL);
+    }
+
+    /* Create a store with CRLs if needed */
+    if (crls && num_crls)
+    {
+        X509_VERIFY_PARAM* verify_param = NULL;
+
+        for (size_t i = 0; i < num_crls; i++)
+        {
+            crl_t* crl_impl = (crl_t*)crls[i];
+
+            /* X509_STORE_add_crl manages its own addition refcount */
+            if (!X509_STORE_add_crl(store, crl_impl->crl))
+                OE_RAISE_MSG(
+                    OE_CRYPTO_ERROR, "Failed to add CRL to X509 store", NULL);
+        }
+
+        /* Get the verify parameter (must not be null) */
+        if (!(verify_param = X509_STORE_CTX_get0_param(ctx)))
+            OE_RAISE_MSG(
+                OE_CRYPTO_ERROR, "Failed to get X509 verify parameter", NULL);
+
+        X509_VERIFY_PARAM_set_flags(verify_param, X509_V_FLAG_CRL_CHECK);
+        X509_VERIFY_PARAM_set_flags(verify_param, X509_V_FLAG_CRL_CHECK_ALL);
+    }
 
     /* Inject the certificate into the verification context */
-    X509_STORE_CTX_set_cert(ctx, cert);
+    X509_STORE_CTX_set_cert(ctx, x509);
 
     /* Set the CA chain into the verification context */
-    X509_STORE_CTX_trusted_stack(ctx, chain);
+    if (chain)
+        X509_STORE_CTX_trusted_stack(ctx, chain);
+    else
+        X509_STORE_add_cert(store, x509);
 
     /* Finally verify the certificate */
     if (!X509_verify_cert(ctx))
-        OE_RAISE(OE_FAILURE);
+    {
+        oe_result_t verify_result = OE_VERIFY_FAILED;
+        int errorno = X509_STORE_CTX_get_error(ctx);
+        switch (errorno)
+        {
+            case X509_V_ERR_CRL_HAS_EXPIRED:
+                verify_result = OE_VERIFY_CRL_EXPIRED;
+                break;
+            case X509_V_ERR_UNABLE_TO_GET_CRL:
+                verify_result = OE_VERIFY_CRL_MISSING;
+                break;
+            case X509_V_ERR_CERT_REVOKED:
+                verify_result = OE_VERIFY_REVOKED;
+                break;
+        }
+        OE_RAISE_MSG(
+            verify_result,
+            "X509_verify_cert failed!\n"
+            " error: (%d) %s\n",
+            errorno,
+            X509_verify_cert_error_string(errorno));
+    }
 
     result = OE_OK;
 
 done:
 
-    if (cert)
-        X509_free(cert);
+    if (x509)
+        X509_free(x509);
 
     if (chain)
         sk_X509_pop_free(chain, X509_free);
+
+    if (store)
+        X509_STORE_free(store);
 
     if (ctx)
         X509_STORE_CTX_free(ctx);
@@ -380,7 +424,7 @@ static oe_result_t _verify_whole_chain(STACK_OF(X509) * chain)
 
     /* Get the root certificate */
     if (!(root = _find_root_cert(chain)))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_VERIFY_FAILED);
 
     /* Get number of certificates in the chain */
     n = sk_X509_num(chain);
@@ -398,7 +442,7 @@ static oe_result_t _verify_whole_chain(STACK_OF(X509) * chain)
         X509_up_ref(root);
 
         if (!sk_X509_push(subchain, root))
-            OE_RAISE(OE_FAILURE);
+            OE_RAISE(OE_CRYPTO_ERROR);
     }
 
     /* Verify each certificate in the chain against the subchain */
@@ -407,16 +451,17 @@ static oe_result_t _verify_whole_chain(STACK_OF(X509) * chain)
         X509* cert = sk_X509_value(chain, i);
 
         if (!cert)
-            OE_RAISE(OE_FAILURE);
+            OE_RAISE(OE_CRYPTO_ERROR);
 
-        OE_CHECK(_verify_cert(cert, subchain));
+        /* Verify cert chain without CRL checks */
+        OE_CHECK(_verify_cert(cert, subchain, NULL, 0));
 
         /* Add this certificate to the subchain */
         {
             X509_up_ref(cert);
 
             if (!sk_X509_push(subchain, cert))
-                OE_RAISE(OE_FAILURE);
+                OE_RAISE(OE_CRYPTO_ERROR);
         }
     }
 
@@ -465,11 +510,11 @@ oe_result_t oe_cert_read_pem(
 
     /* Create a BIO object for reading the PEM data */
     if (!(bio = BIO_new_mem_buf(pem_data, (int)pem_size)))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_CRYPTO_ERROR);
 
     /* Convert the PEM BIO into a certificate object */
     if (!(x509 = PEM_read_bio_X509(bio, NULL, 0, NULL)))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_CRYPTO_ERROR);
 
     _cert_init(impl, x509);
     x509 = NULL;
@@ -483,6 +528,45 @@ done:
 
     if (x509)
         X509_free(x509);
+
+    return result;
+}
+
+oe_result_t oe_cert_read_der(
+    oe_cert_t* cert,
+    const void* der_data,
+    size_t der_size)
+{
+    oe_result_t result = OE_UNEXPECTED;
+    Cert* impl = (Cert*)cert;
+    X509* x509 = NULL;
+    unsigned char* p = NULL;
+
+    /* Zero-initialize the implementation */
+    if (impl)
+        impl->magic = 0;
+
+    /* Check parameters */
+    if (!der_data || !der_size || der_size > OE_INT_MAX || !cert)
+        OE_RAISE(OE_INVALID_PARAMETER);
+
+    /* Initialize OpenSSL (if not already initialized) */
+    oe_initialize_openssl();
+
+    p = (unsigned char*)der_data;
+
+    /* Convert the PEM BIO into a certificate object */
+    if (!(x509 = d2i_X509(NULL, (const unsigned char**)&p, (int)der_size)))
+        OE_RAISE(OE_FAILURE);
+
+    _cert_init(impl, x509);
+    x509 = NULL;
+
+    result = OE_OK;
+
+done:
+
+    X509_free(x509);
 
     return result;
 }
@@ -591,8 +675,8 @@ oe_result_t oe_cert_chain_free(oe_cert_chain_t* chain)
     CertChain* impl = (CertChain*)chain;
 
     /* Check the parameter */
-    if (_cert_chain_is_valid(impl))
-        OE_RAISE_NO_TRACE(OE_INVALID_PARAMETER);
+    if (!_cert_chain_is_valid(impl))
+        OE_RAISE(OE_INVALID_PARAMETER);
 
     /* Release the stack of certificates */
     sk_X509_pop_free(impl->sk, X509_free);
@@ -610,130 +694,37 @@ oe_result_t oe_cert_verify(
     oe_cert_t* cert,
     oe_cert_chain_t* chain,
     const oe_crl_t* const* crls,
-    size_t num_crls,
-    oe_verify_cert_error_t* error)
+    size_t num_crls)
 {
     oe_result_t result = OE_UNEXPECTED;
     Cert* cert_impl = (Cert*)cert;
     CertChain* chain_impl = (CertChain*)chain;
-    X509_STORE_CTX* ctx = NULL;
-    X509_STORE* store = NULL;
-    X509* x509 = NULL;
-
-    /* Initialize error to NULL for now */
-    if (error)
-        *error->buf = '\0';
 
     /* Check for invalid cert parameter */
     if (!_cert_is_valid(cert_impl))
     {
-        _set_err(error, "invalid cert parameter");
-        OE_RAISE(OE_INVALID_PARAMETER);
+        OE_RAISE_MSG(OE_INVALID_PARAMETER, "Invalid cert parameter", NULL);
     }
 
     /* Check for invalid chain parameter */
-    if (!_cert_chain_is_valid(chain_impl))
+    if (chain && !_cert_chain_is_valid(chain_impl))
     {
-        _set_err(error, "invalid chain parameter");
-        OE_RAISE(OE_INVALID_PARAMETER);
-    }
-
-    /* We must make a copy of the certificate, else previous successful
-     * verifications cause subsequent bad verifications to succeed. It is
-     * likely that some state is stored in the certificate upon successful
-     * verification. We can clear this by making a copy.
-     */
-    if (!(x509 = _clone_x509(cert_impl->x509)))
-    {
-        _set_err(error, "invalid X509 certificate");
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE_MSG(OE_INVALID_PARAMETER, "Invalid chain parameter", NULL);
     }
 
     /* Initialize OpenSSL (if not already initialized) */
     oe_initialize_openssl();
 
-    /* Create a context for verification */
-    if (!(ctx = X509_STORE_CTX_new()))
-    {
-        _set_err(error, "failed to allocate X509 context");
-        OE_RAISE(OE_FAILURE);
-    }
-
-    /* Create a store for the verification */
-    if (!(store = X509_STORE_new()))
-    {
-        _set_err(error, "failed to allocate X509 store");
-        OE_RAISE(OE_FAILURE);
-    }
-
-    /* Initialize the context that will be used to verify the certificate */
-    if (!X509_STORE_CTX_init(ctx, store, NULL, NULL))
-    {
-        _set_err(error, "failed to initialize X509 context");
-        OE_RAISE(OE_FAILURE);
-    }
-
-    /* Set the certificate into the verification context */
-    X509_STORE_CTX_set_cert(ctx, x509);
-
-    /* Set the CA chain into the verification context */
-    X509_STORE_CTX_trusted_stack(ctx, chain_impl->sk);
-
-    /* Set the CRLs if any */
-    if (crls && num_crls)
-    {
-        X509_VERIFY_PARAM* verify_param;
-
-        for (size_t i = 0; i < num_crls; i++)
-        {
-            crl_t* crl_impl = (crl_t*)crls[i];
-
-            X509_CRL_up_ref(crl_impl->crl);
-
-            if (!X509_STORE_add_crl(store, crl_impl->crl))
-                OE_RAISE(OE_FAILURE);
-        }
-
-        /* Get the verify parameter (must not be null) */
-        if (!(verify_param = X509_STORE_CTX_get0_param(ctx)))
-            OE_RAISE(OE_FAILURE);
-
-        X509_VERIFY_PARAM_set_flags(verify_param, X509_V_FLAG_CRL_CHECK);
-        X509_VERIFY_PARAM_set_flags(verify_param, X509_V_FLAG_CRL_CHECK_ALL);
-    }
-
-    /* Finally verify the certificate */
-    if (!X509_verify_cert(ctx))
-    {
-        int errorno;
-        if (error)
-            _set_err(
-                error,
-                X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx)));
-
-        errorno = X509_STORE_CTX_get_error(ctx);
-        OE_RAISE_MSG(
-            (X509_V_ERR_CRL_HAS_EXPIRED == errorno) ? OE_VERIFY_CRL_EXPIRED
-                                                    : OE_VERIFY_FAILED,
-            "X509_verify_cert failed!\n"
-            " error: (%d) %s\n",
-            errorno,
-            X509_verify_cert_error_string(errorno));
-    }
+    /* Verify the certificate */
+    OE_CHECK(_verify_cert(
+        cert_impl->x509,
+        (chain_impl != NULL ? chain_impl->sk : NULL),
+        crls,
+        num_crls));
 
     result = OE_OK;
 
 done:
-
-    if (ctx)
-        X509_STORE_CTX_free(ctx);
-
-    if (store)
-        X509_STORE_free(store);
-
-    if (x509)
-        X509_free(x509);
-
     return result;
 }
 
@@ -756,7 +747,7 @@ oe_result_t oe_cert_get_rsa_public_key(
 
     /* Get public key (increments reference count) */
     if (!(pkey = X509_get_pubkey(impl->x509)))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_CRYPTO_ERROR);
 
     /* Get RSA public key (increments reference count) */
     if (!(rsa = EVP_PKEY_get1_RSA(pkey)))
@@ -797,14 +788,14 @@ oe_result_t oe_cert_get_ec_public_key(
 
     /* Get public key (increments reference count) */
     if (!(pkey = X509_get_pubkey(impl->x509)))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_CRYPTO_ERROR);
 
     /* If this is not an EC key */
     {
         EC_KEY* ec;
 
         if (!(ec = EVP_PKEY_get1_EC_KEY(pkey)))
-            OE_RAISE(OE_FAILURE);
+            OE_RAISE_NO_TRACE(OE_CRYPTO_ERROR);
 
         EC_KEY_free(ec);
     }
@@ -890,11 +881,11 @@ oe_result_t oe_cert_chain_get_cert(
 
     /* Get the certificate with the given index */
     if (!(x509 = sk_X509_value(impl->sk, (int)index)))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_CRYPTO_ERROR);
 
     /* Increment the reference count and initialize the output certificate */
     if (!X509_up_ref(x509))
-        OE_RAISE(OE_FAILURE);
+        OE_RAISE(OE_CRYPTO_ERROR);
     _cert_init((Cert*)cert, x509);
 
     result = OE_OK;
@@ -965,15 +956,15 @@ oe_result_t oe_cert_find_extension(
 
         /* Get the i-th extension from the stack */
         if (!(ext = sk_X509_EXTENSION_value(extensions, i)))
-            OE_RAISE(OE_FAILURE);
+            OE_RAISE(OE_CRYPTO_ERROR);
 
         /* Get the OID */
         if (!(obj = X509_EXTENSION_get_object(ext)))
-            OE_RAISE(OE_FAILURE);
+            OE_RAISE(OE_CRYPTO_ERROR);
 
         /* Get the string name of the OID */
         if (!OBJ_obj2txt(ext_oid.buf, sizeof(ext_oid.buf), obj, 1))
-            OE_RAISE(OE_FAILURE);
+            OE_RAISE(OE_CRYPTO_ERROR);
 
         /* If found then get the data */
         if (strcmp(ext_oid.buf, oid) == 0)
@@ -982,7 +973,7 @@ oe_result_t oe_cert_find_extension(
 
             /* Get the data from the extension */
             if (!(str = X509_EXTENSION_get_data(ext)))
-                OE_RAISE(OE_FAILURE);
+                OE_RAISE(OE_CRYPTO_ERROR);
 
             /* If the caller's buffer is too small, raise error */
             if ((size_t)str->length > *size)

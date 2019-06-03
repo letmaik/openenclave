@@ -16,14 +16,12 @@
 #include "readfile.h"
 #include "tests.h"
 
-/* _CERT1 use as a Intermediate cert
- * _CERT2 use as a Leaf cert
- * _CHAIN1 consists Leaf & Root cert
- * _CHAIN2 consists Intermediate & Root cert
- * _CRL1 use as a intermediate crl which is issued by
- * Intermediate which revokes leaf cert
- * _CRL2 use as a root crl which is issued by Root
- * which revokes leaf cert
+/* _CERT1 loads intermediate.cert.pem
+ * _CERT2 loads leaf.cert.pem
+ * _CHAIN1 loads leaf.cert.pem & root.cert.pem
+ * _CHAIN2 loads intermediate.cert.pem & root.cert.pem
+ * _CRL1 loads intermediate.crl.der, which revokes leaf.cert.pem
+ * _CRL2 loads root.crl.der, which also revokes leaf.cert.pem
  */
 
 size_t crl_size1, crl_size2;
@@ -44,7 +42,6 @@ static void _test_verify(
 {
     oe_cert_t cert;
     oe_cert_chain_t chain;
-    oe_verify_cert_error_t error = {0};
     oe_result_t r;
 
     r = oe_cert_read_pem(&cert, cert_pem, strlen(cert_pem) + 1);
@@ -59,31 +56,11 @@ static void _test_verify(
     if (crl)
         OE_TEST(num_crl > 0);
 
-    r = oe_cert_verify(&cert, &chain, crl, num_crl, &error);
+    r = oe_cert_verify(&cert, &chain, crl, num_crl);
 
     if (revoked)
     {
-        OE_TEST(r == OE_VERIFY_FAILED);
-
-        /* Look for a revocation error message */
-        {
-            bool found = false;
-            const char* messages[] = {
-                "certificate revoked",
-                "The certificate has been revoked (is on a CRL)",
-            };
-
-            for (size_t i = 0; i < OE_COUNTOF(messages); i++)
-            {
-                if (strstr(error.buf, messages[i]) == 0)
-                {
-                    found = true;
-                    break;
-                }
-            }
-
-            OE_TEST(found);
-        }
+        OE_TEST(r == OE_VERIFY_REVOKED);
     }
     else
     {
@@ -267,21 +244,25 @@ static void _test_verify_with_two_crls(
 
 void TestCRL(void)
 {
-    OE_TEST(read_cert("../data/Intermediate.crt.pem", _CERT1) == OE_OK);
-    OE_TEST(read_cert("../data/Leaf.crt.pem", _CERT2) == OE_OK);
+    OE_TEST(read_cert("../data/intermediate.cert.pem", _CERT1) == OE_OK);
+    OE_TEST(read_cert("../data/leaf.cert.pem", _CERT2) == OE_OK);
 
-    OE_TEST(
-        read_chain("../data/Leaf.crt.pem", "../data/RootCA.crt.pem", _CHAIN1) ==
-        OE_OK);
     OE_TEST(
         read_chain(
-            "../data/Intermediate.crt.pem",
-            "../data/RootCA.crt.pem",
-            _CHAIN2) == OE_OK);
+            "../data/leaf.cert.pem",
+            "../data/root.cert.pem",
+            _CHAIN1,
+            OE_COUNTOF(_CHAIN1)) == OE_OK);
+    OE_TEST(
+        read_chain(
+            "../data/intermediate.cert.pem",
+            "../data/root.cert.pem",
+            _CHAIN2,
+            OE_COUNTOF(_CHAIN2)) == OE_OK);
 
     OE_TEST(
-        read_crl("../data/intermediate_crl.der", _CRL1, &crl_size1) == OE_OK);
-    OE_TEST(read_crl("../data/root_crl.der", _CRL2, &crl_size2) == OE_OK);
+        read_crl("../data/intermediate.crl.der", _CRL1, &crl_size1) == OE_OK);
+    OE_TEST(read_crl("../data/root.crl.der", _CRL2, &crl_size2) == OE_OK);
 
     _test_verify_without_crl(_CERT1, _CHAIN1);
     _test_verify_without_crl(_CERT2, _CHAIN2);

@@ -117,8 +117,6 @@ if (OE_SGX)
       message(FATAL_ERROR "Clang version 7.0 or higher is required")
     endif ()
 
-    # Setup cross compiler (clangw)
-    add_subdirectory(windows/clangw)
     set(USE_CLANGW ON)
   endif()
 else() # NOT OE_SGX
@@ -187,6 +185,7 @@ if (USE_DEBUG_MALLOC AND WIN32)
 endif ()
 
 option(ADD_WINDOWS_ENCLAVE_TESTS "Build Windows enclave tests" OFF)
+# Warning: turning on simulation mode on Windows may cause test failures and random crashes
 option(WIN32_SIMULATION "Windows Simulation Mode" OFF)
 
 find_program(VALGRIND "valgrind")

@@ -89,21 +89,6 @@ size_t oe_strlcpy(char* dest, const char* src, size_t size)
     return (size_t)(src - start);
 }
 
-char* oe_strncpy(char* dest, const char* src, size_t n)
-{
-    char* ret = dest;
-
-    /* Copy at most n bytes. Terminate when src is exhausted. */
-    while (n-- && *src)
-        *dest++ = *src++;
-
-    /* If there is room left, then inject zero-terminator. */
-    if (n)
-        *dest = '\0';
-
-    return ret;
-}
-
 size_t oe_strlcat(char* dest, const char* src, size_t size)
 {
     size_t n = 0;
@@ -167,6 +152,24 @@ char* oe_strdup(const char* s)
         return NULL;
 
     return memcpy(p, s, len + 1);
+}
+
+char* oe_strncpy(char* dest, const char* src, size_t n)
+{
+    char* ret = dest;
+
+    if (dest == NULL)
+        return NULL;
+
+    /* Copy at most n bytes. Terminate when src is exhausted. */
+    while (n-- && *src)
+        *dest++ = *src++;
+
+    /* If there is room left, then inject zero-terminator. */
+    if (n)
+        *dest = '\0';
+
+    return ret;
 }
 
 OE_WEAK_ALIAS(oe_strcmp, strcmp);
