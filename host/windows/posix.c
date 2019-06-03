@@ -784,8 +784,6 @@ __declspec(noreturn) static void _panic(
     abort();
 }
 
-#define PANIC _panic(__FILE__, __LINE__, __FUNCTION__);
-
 /*
 **==============================================================================
 **
@@ -2725,22 +2723,6 @@ done:
         free(fds);
 
     return ret;
-}
-
-/*
-**==============================================================================
-**
-** poll:
-**
-**==============================================================================
-*/
-
-int oe_posix_poll_ocall(
-    struct oe_host_pollfd* host_fds,
-    oe_nfds_t nfds,
-    int timeout)
-{
-    PANIC;
 }
 
 /*
