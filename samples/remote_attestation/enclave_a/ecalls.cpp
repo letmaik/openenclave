@@ -14,7 +14,7 @@
 // successful attestation.
 // The g_enclave_secret_data holds the secret data specific to the holding
 // enclave, it's only visible inside this secured enclave. Arbitrary enclave
-// specific secret data exchanged by the enclaves. In this sample, the first
+// specific secret data is exchanged by the enclaves. In this sample, the first
 // enclave sends its g_enclave_secret_data (encrypted) to the second enclave.
 // The second enclave decrypts the received data and adds it to its own
 // g_enclave_secret_data, and sends it back to the other enclave.
@@ -27,8 +27,8 @@ enclave_config_data_t config_data = {g_enclave_secret_data,
 
 // Declare a static dispatcher object for enabling
 // for better organizing enclave-wise global variables
-static ecall_dispatcher dispatcher("Enclave1", &config_data);
-const char* enclave_name = "Enclave1";
+static ecall_dispatcher dispatcher("Enclave_a", &config_data);
+const char* enclave_name = "Enclave_a";
 /**
  * Return the public key of this enclave along with the enclave's remote report.
  * Another enclave can use the remote report to attest the enclave and verify
@@ -54,6 +54,25 @@ int verify_report_and_set_pubkey(
 {
     return dispatcher.verify_report_and_set_pubkey(
         pem_key, key_size, remote_report, remote_report_size);
+}
+
+/**
+ * Create ephemeral symmetric key, encrypt using other enclave's public key
+ * and sign using private key
+ */
+int establish_secure_channel(uint8_t** data, size_t* size)
+{
+    return dispatcher.establish_secure_channel(data, size);
+}
+
+/**
+ * Verify signature, decrypt using private key
+ * Send back symmetric key after encrypting using other enclave's public key
+ * and sign using private key
+ */
+int acknowledge_secure_channel(uint8_t* data, size_t size)
+{
+    return dispatcher.acknowledge_secure_channel(data, size);
 }
 
 // Encrypt message for another enclave using the public key stored for it.

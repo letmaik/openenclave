@@ -17,6 +17,9 @@
 #include "log.h"
 
 #define PUBLIC_KEY_SIZE 512
+#define TAG_SIZE 16
+#define IV_SIZE 12
+#define ADD_SIZE 4
 
 class Crypto
 {
@@ -43,7 +46,7 @@ class Crypto
      * Encrypt encrypts the given data using the given public key.
      * Used to encrypt data using the public key of another enclave.
      */
-    bool Encrypt(
+    bool encrypt(
         const uint8_t* pem_public_key,
         const uint8_t* data,
         size_t size,
@@ -51,7 +54,7 @@ class Crypto
         size_t* encrypted_data_size);
 
     /**
-     * decrypt decrypts the given data using current enclave's private key.
+     * Decrypt decrypts the given data using current enclave's private key.
      * Used to receive encrypted data from another enclave.
      */
     bool decrypt(
@@ -82,7 +85,53 @@ class Crypto
     /**
      * Compute the sha256 hash of given data.
      */
-    int Sha256(const uint8_t* data, size_t data_size, uint8_t sha256[32]);
+    int sha256(const uint8_t* data, size_t data_size, uint8_t sha256[32]);
+
+    /**
+     * encrypt_gcm encrypts the given data using the given symmetric key.
+     */
+    bool encrypt_gcm(
+        const uint8_t* sym_key,
+        uint32_t sequence_num,
+        const uint8_t* data,
+        size_t data_size,
+        uint8_t* iv_str,
+        uint8_t* encrypted_data,
+        size_t* encrypted_data_size,
+        uint8_t* tag_output);
+
+    /**
+     * decrypt_gcm decrypts the given data using the given symmetric key.
+     * Used to receive encrypted data from another enclave.
+     */
+    bool decrypt_gcm(
+        const uint8_t* sym_key,
+        const uint8_t* iv_str,
+        const uint8_t* add_str,
+        const uint8_t* encrypted_data,
+        size_t encrypted_data_size,
+        const uint8_t* tag_output,
+        uint8_t* data,
+        size_t* data_size);
+
+    /**
+     * Sign the SHA256 hash with enclave's private key
+     */
+    int sign(
+        const unsigned char* hash_data,
+        size_t hash_size,
+        unsigned char* sig,
+        size_t* sig_len);
+
+    /**
+     * Verify the signature using public key of other enclave
+     */
+    int verify_sign(
+        const uint8_t* pem_public_key,
+        const unsigned char* hash_data,
+        size_t hash_size,
+        const unsigned char* sig,
+        size_t sig_len);
 
   private:
     /**

@@ -14,12 +14,15 @@ typedef struct _enclave_config_data
     uint8_t* enclave_secret_data;
     const char* other_enclave_pubkey_pem;
     size_t other_enclave_pubkey_pem_size;
+    uint8_t sym_key[32];      // 32 bytes or 256 bits random symmetric key
+    uint32_t sequence_number; // Sequence number from 1 to (2^32) - 1
 } enclave_config_data_t;
 
 class ecall_dispatcher
 {
   private:
-    bool m_initialized;
+    uint8_t
+        m_channel_state; // INITIAL_CHANNEL_STATE/MUTUAL_ATTESTATION_STATE/SECURE_CHANNEL_STATE
     Crypto* m_crypto;
     Attestation* m_attestation;
     string m_name;
@@ -39,6 +42,8 @@ class ecall_dispatcher
         size_t key_size,
         uint8_t* remote_report,
         size_t remote_report_size);
+    int establish_secure_channel(uint8_t** key, size_t* key_size);
+    int acknowledge_secure_channel(uint8_t* key, size_t key_size);
     int generate_encrypted_message(uint8_t** data, size_t* size);
     int process_encrypted_msg(
         uint8_t* encrypted_data,

@@ -27,8 +27,8 @@ enclave_config_data_t config_data = {g_enclave_secret_data,
 
 // Declare a static dispatcher object for enabling
 // for better organizing enclave-wise global variables
-static ecall_dispatcher dispatcher("Enclave2", &config_data);
-const char* enclave_name = "Enclave2";
+static ecall_dispatcher dispatcher("Enclave_b", &config_data);
+const char* enclave_name = "Enclave_b";
 
 /**
  * Return the public key of this enclave along with the enclave's remote report.
@@ -54,6 +54,25 @@ int verify_report_and_set_pubkey(
 {
     return dispatcher.verify_report_and_set_pubkey(
         pem_key, key_size, remote_report, remote_report_size);
+}
+
+/**
+ * Create ephemeral symmetric key, encrypt using other enclave's public key
+ * and sign using private key
+ */
+int establish_secure_channel(uint8_t** data, size_t* size)
+{
+    return dispatcher.establish_secure_channel(data, size);
+}
+
+/**
+ * Verify signature, decrypt using private key
+ * Send back symmetric key after encrypting using other enclave's public key
+ * and sign using private key
+ */
+int acknowledge_secure_channel(uint8_t* data, size_t size)
+{
+    return dispatcher.acknowledge_secure_channel(data, size);
 }
 
 // Encrypt message for another enclave using the public key stored for it.

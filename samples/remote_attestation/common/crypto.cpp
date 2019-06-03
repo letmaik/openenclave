@@ -2,9 +2,11 @@
 // Licensed under the MIT License.
 
 #include "crypto.h"
+#include <mbedtls/gcm.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/rsa.h>
 #include <openenclave/enclave.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -99,7 +101,7 @@ void Crypto::retrieve_public_key(uint8_t pem_public_key[512])
 }
 
 // Compute the sha256 hash of given data.
-int Crypto::Sha256(const uint8_t* data, size_t data_size, uint8_t sha256[32])
+int Crypto::sha256(const uint8_t* data, size_t data_size, uint8_t sha256[32])
 {
     int ret = 0;
     mbedtls_sha256_context ctx;
@@ -127,7 +129,7 @@ exit:
  * Encrypt encrypts the given data using the given public key.
  * Used to encrypt data using the public key of another enclave.
  */
-bool Crypto::Encrypt(
+bool Crypto::encrypt(
     const uint8_t* pem_public_key,
     const uint8_t* data,
     size_t data_size,
@@ -158,15 +160,7 @@ bool Crypto::Encrypt(
     rsa_context->padding = MBEDTLS_RSA_PKCS_V21;
     rsa_context->hash_id = MBEDTLS_MD_SHA256;
 
-    if (rsa_context->padding == MBEDTLS_RSA_PKCS_V21)
-    {
-        TRACE_ENCLAVE("Padding used: MBEDTLS_RSA_PKCS_V21 for OAEP or PSS");
-    }
-
-    if (rsa_context->padding == MBEDTLS_RSA_PKCS_V15)
-    {
-        TRACE_ENCLAVE("New MBEDTLS_RSA_PKCS_V15  for 1.5 padding");
-    }
+    TRACE_ENCLAVE("Padding used: MBEDTLS_RSA_PKCS_V21 for OAEP or PSS");
 
     // Encrypt the data.
     res = mbedtls_rsa_pkcs1_encrypt(
@@ -309,4 +303,220 @@ exit:
 
 exit_preinit:
     return ret;
+}
+
+/**
+ * encrypt_gcm encrypts the given data using the given symmetric key.
+ * sequence_num is used as additional data to prevent replay attacks
+ * Random IV is generated each time.
+ */
+bool Crypto::encrypt_gcm(
+    const uint8_t* sym_key,
+    uint32_t sequence_num,
+    const uint8_t* data,
+    size_t data_size,
+    uint8_t* iv_str,
+    uint8_t* encrypted_data,
+    size_t* encrypted_data_size,
+    uint8_t* tag_output)
+{
+    mbedtls_gcm_context gcm_context;
+    uint8_t add_str[ADD_SIZE]; // Sequence number is sent as additional data
+
+    bool result = false;
+    int res = -1;
+    size_t tag_len = TAG_SIZE;
+    size_t add_len = ADD_SIZE;
+
+    if (!m_initialized)
+        goto exit;
+
+    mbedtls_gcm_init(&gcm_context);
+
+    // Generate a random IV each time
+    memset(iv_str, 0x00, IV_SIZE);
+    mbedtls_ctr_drbg_random(&m_ctr_drbg_contex, iv_str, IV_SIZE);
+    memset(tag_output, 0x00, 16);
+    memset(add_str, 0x00, ADD_SIZE);
+
+    add_str[0] = sequence_num & 0xff;
+    add_str[1] = sequence_num & 0xff00;
+    add_str[2] = sequence_num & 0xff0000;
+    add_str[3] = sequence_num & 0xff000000;
+
+    res = mbedtls_gcm_setkey(&gcm_context, MBEDTLS_CIPHER_ID_AES, sym_key, 256);
+    if (res != 0)
+    {
+        TRACE_ENCLAVE("encrypt_gcm: mbedtls_gcm_setkey failed with %d\n", res);
+        goto exit;
+    }
+
+    TRACE_ENCLAVE("encrypt_gcm: mbedtls_gcm_setkey succeeded\n");
+
+    res = mbedtls_gcm_crypt_and_tag(
+        &gcm_context,
+        MBEDTLS_GCM_ENCRYPT,
+        data_size,
+        iv_str,
+        IV_SIZE,
+        add_str,
+        add_len,
+        data,
+        encrypted_data,
+        tag_len,
+        tag_output);
+
+    if (res != 0)
+    {
+        TRACE_ENCLAVE(
+            "encrypt_gcm: mbedtls_gcm_crypt_and_tag failed with %d\n", res);
+        goto exit;
+    }
+
+    *encrypted_data_size = 16;
+    result = true;
+exit:
+    mbedtls_gcm_free(&gcm_context);
+    return result;
+}
+
+/**
+ * Decrypt_gcm decrypts the given data using the given symmetric key, IV and
+ * additional string. Used to decrypt data received from another enclave.
+ */
+bool Crypto::decrypt_gcm(
+    const uint8_t* sym_key,
+    const uint8_t* iv_str,
+    const uint8_t* add_str,
+    const uint8_t* encrypted_data,
+    size_t encrypted_data_size,
+    const uint8_t* tag_str,
+    uint8_t* data,
+    size_t* data_size)
+{
+    mbedtls_gcm_context gcm_context;
+    bool result = false;
+    int res = 0;
+    size_t tag_len = 16;
+
+    if (!m_initialized)
+        goto exit;
+
+    mbedtls_gcm_init(&gcm_context);
+
+    res = mbedtls_gcm_setkey(&gcm_context, MBEDTLS_CIPHER_ID_AES, sym_key, 256);
+    if (res != 0)
+    {
+        TRACE_ENCLAVE("Decrypt_gcm: mbedtls_gcm_setkey failed with %d\n", res);
+        goto exit;
+    }
+
+    res = mbedtls_gcm_auth_decrypt(
+        &gcm_context,
+        *data_size,
+        iv_str,
+        IV_SIZE,
+        add_str,
+        ADD_SIZE,
+        tag_str,
+        tag_len,
+        encrypted_data,
+        data);
+    if (res != 0)
+    {
+        TRACE_ENCLAVE(
+            "Decrypt_gcm: mbedtls_gcm_auth_decrypt failed with %d\n", res);
+        goto exit;
+    }
+
+    TRACE_ENCLAVE("Decrypt_gcm: mbedtls_gcm_setkey succeeded\n");
+
+    *data_size = 16;
+    result = true;
+exit:
+    mbedtls_gcm_free(&gcm_context);
+    return result;
+}
+
+int Crypto::sign(
+    const unsigned char* hash_data,
+    size_t hash_size,
+    unsigned char* sig,
+    size_t* sig_len)
+{
+    int rc = 0;
+    int res = -1;
+    mbedtls_rsa_context* rsa_context;
+
+    if (!m_initialized)
+        goto exit;
+
+    rsa_context = mbedtls_pk_rsa(m_pk_context);
+    rsa_context->padding = MBEDTLS_RSA_PKCS_V21;
+    rsa_context->hash_id = MBEDTLS_MD_SHA256;
+
+    rc = mbedtls_rsa_pkcs1_sign(
+        rsa_context,
+        mbedtls_ctr_drbg_random,
+        &m_ctr_drbg_contex,
+        MBEDTLS_RSA_PRIVATE,
+        MBEDTLS_MD_SHA256,
+        hash_size,
+        hash_data,
+        sig);
+
+exit:
+    return rc;
+}
+
+int Crypto::verify_sign(
+    const uint8_t* pem_public_key,
+    const unsigned char* hash_data,
+    size_t hash_size,
+    const unsigned char* sig,
+    size_t sig_len)
+{
+    int rc = 0;
+    mbedtls_pk_context key;
+    size_t key_size = 0;
+    int res = -1;
+    mbedtls_rsa_context* rsa_context;
+
+    mbedtls_pk_init(&key);
+
+    if (!m_initialized)
+        goto exit;
+
+    res = mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
+    if (res != 0)
+    {
+        TRACE_ENCLAVE("mbedtls_pk_setup failed (%d).", res);
+        goto exit;
+    }
+
+    // Read the given public key.
+    key_size = strlen((const char*)pem_public_key) + 1; // Include ending '\0'.
+    res = mbedtls_pk_parse_public_key(&key, pem_public_key, key_size);
+    if (res != 0)
+    {
+        TRACE_ENCLAVE("mbedtls_pk_parse_public_key failed.");
+        goto exit;
+    }
+
+    rsa_context = mbedtls_pk_rsa(key);
+    rsa_context->padding = MBEDTLS_RSA_PKCS_V21;
+    rsa_context->hash_id = MBEDTLS_MD_SHA256;
+
+    rc = mbedtls_rsa_pkcs1_verify(
+        rsa_context,
+        mbedtls_ctr_drbg_random,
+        &m_ctr_drbg_contex,
+        MBEDTLS_RSA_PUBLIC,
+        MBEDTLS_MD_SHA256,
+        hash_size,
+        hash_data,
+        sig);
+exit:
+    mbedtls_pk_free(&key);
+    return rc;
 }

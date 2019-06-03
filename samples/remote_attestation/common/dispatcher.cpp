@@ -10,7 +10,8 @@ ecall_dispatcher::ecall_dispatcher(
     : m_crypto(NULL), m_attestation(NULL)
 {
     m_enclave_config = enclave_config;
-    m_initialized = initialize(name);
+    m_channel_state = UNINITIALIZED_CHANNEL_STATE;
+    initialize(name);
 }
 
 ecall_dispatcher::~ecall_dispatcher()
@@ -57,7 +58,7 @@ bool ecall_dispatcher::initialize(const char* name)
     // little endian representation of the public key modulus. This value
     // is populated by the signer_id sub-field of a parsed oe_report_t's
     // identity field.
-    if (m_crypto->Sha256(modulus, modulus_size, m_other_enclave_mrsigner) != 0)
+    if (m_crypto->sha256(modulus, modulus_size, m_other_enclave_mrsigner) != 0)
     {
         goto exit;
     }
@@ -68,6 +69,7 @@ bool ecall_dispatcher::initialize(const char* name)
         goto exit;
     }
     ret = true;
+    m_channel_state = INITIAL_CHANNEL_STATE;
 
 exit:
     if (modulus != NULL)
@@ -94,7 +96,7 @@ int ecall_dispatcher::get_remote_report_with_pubkey(
     int ret = 1;
 
     TRACE_ENCLAVE("get_remote_report_with_pubkey");
-    if (m_initialized == false)
+    if (m_channel_state == UNINITIALIZED_CHANNEL_STATE)
     {
         TRACE_ENCLAVE("ecall_dispatcher initialization failed.");
         goto exit;
@@ -130,6 +132,7 @@ int ecall_dispatcher::get_remote_report_with_pubkey(
         *key_size = sizeof(pem_public_key);
 
         ret = 0;
+        m_channel_state |= REMOTE_REPORT_OBTAINED;
         TRACE_ENCLAVE("get_remote_report_with_pubkey succeeded");
     }
     else
@@ -158,7 +161,7 @@ int ecall_dispatcher::verify_report_and_set_pubkey(
 {
     int ret = 1;
 
-    if (m_initialized == false)
+    if (m_channel_state == UNINITIALIZED_CHANNEL_STATE)
     {
         TRACE_ENCLAVE("ecall_dispatcher initialization failed.");
         goto exit;
@@ -176,42 +179,243 @@ int ecall_dispatcher::verify_report_and_set_pubkey(
         goto exit;
     }
     ret = 0;
+    m_channel_state |= REMOTE_REPORT_VERIFIED;
     TRACE_ENCLAVE("verify_report_and_set_pubkey succeeded.");
 
 exit:
     return ret;
 }
 
-int ecall_dispatcher::generate_encrypted_message(uint8_t** data, size_t* size)
+int ecall_dispatcher::establish_secure_channel(uint8_t** key, size_t* key_size)
 {
-    uint8_t encrypted_data_buf[1024];
-    size_t encrypted_data_size;
+    uint8_t encrypted_key_buf[512];
+    uint8_t signature[256];
+    uint8_t digest[32];
+    size_t encrypted_key_size = 256;
+    size_t signature_size = 256;
+    size_t total_size = 512;
+
     int ret = 1;
 
-    if (m_initialized == false)
+    if ((m_channel_state & MUTUAL_ATTESTATION_STATE) !=
+        MUTUAL_ATTESTATION_STATE)
     {
-        TRACE_ENCLAVE("ecall_dispatcher initialization failed.");
+        TRACE_ENCLAVE("ecall_dispatcher establish_secure_channel failed as "
+                      "mutual attestation incomplete.");
+        goto exit;
+    }
+
+    // Step 1 - Create an ephemeral symmetric key;
+    // Initialize sequence number to 0, numbering will start at 1
+    if (oe_random(m_enclave_config->sym_key, 32) != OE_OK)
+    {
+        TRACE_ENCLAVE("ecall_dispatcher initialization failed to generate "
+                      "ephemeral symmetric key.");
+        goto exit;
+    }
+
+    TRACE_ENCLAVE("enclave: establish_secure_channel: Generated random "
+                  "symmetric key successfully");
+
+    m_enclave_config->sequence_number = 0;
+
+    // Step 2- Encrypt the symmetric key with the other enclave's public key
+    if (m_crypto->encrypt(
+            m_crypto->get_the_other_enclave_public_key(),
+            m_enclave_config->sym_key,
+            32,
+            encrypted_key_buf,
+            &encrypted_key_size))
+
+    {
+        // We allocate memory in the host is so that the encrypted data
+        // can be accessed by the hosts. Note that this will not work
+        // TrustZone. TO DO - File an issue to deprecate oe_host_malloc
+        uint8_t* host_buf = (uint8_t*)oe_host_malloc(total_size);
+        if (host_buf == NULL)
+        {
+            TRACE_ENCLAVE(
+                "enclave: establish_secure_channel: oe_host_malloc failed.");
+            goto exit;
+        }
+
+        // Step 3 - Compute a SHA hash of the encrypted key
+        if (m_crypto->sha256(encrypted_key_buf, encrypted_key_size, digest) !=
+            0)
+        {
+            goto exit;
+        }
+
+        TRACE_ENCLAVE("enclave: establish_secure_channel: Computed SHA hash "
+                      "of the encrypted key");
+
+        // Step 4 - Sign this SHA hash with my enclave's private key
+        if (m_crypto->sign(digest, 32, signature, &signature_size) != 0)
+        {
+            goto exit;
+        }
+
+        TRACE_ENCLAVE(
+            "enclave: establish_secure_channel: signature_size = %ld",
+            signature_size);
+
+        if ((encrypted_key_size != 256) || (signature_size != 256))
+        {
+            TRACE_ENCLAVE("enclave: establish_secure_channel: failed as "
+                          "encrypted data size or signature size is not 256");
+        }
+        // Step 5 - Send digest plus signature to the other enclave
+        memcpy(host_buf, encrypted_key_buf, total_size);
+
+        TRACE_ENCLAVE(
+            "enclave: establish_secure_channel: total_size = %ld", total_size);
+        *key = host_buf;
+        *key_size = total_size;
+    }
+    else
+    {
+        goto exit;
+    }
+    ret = 0;
+    m_channel_state = SECURE_CHANNEL_STATE;
+exit:
+    return ret;
+}
+
+/* Encrypted key_buf should contain encrypted key followed by signature, each of
+ * 256 bits
+ */
+int ecall_dispatcher::acknowledge_secure_channel(
+    uint8_t* encrypted_key_buf,
+    size_t encrypted_key_size)
+{
+    int ret = 1;
+    uint8_t* data;
+    size_t data_size = 32;
+    uint8_t digest[32];
+    int rc;
+
+    /* Steps --
+     *   1) Verify Signature; if good proceed to step 2
+     *   2) Decrypt the key using your own private key
+     *   3) Now use this key with sequence number to communicate further
+     */
+    unsigned char* signature = &encrypted_key_buf[256];
+    size_t signature_size = 256;
+
+    data = m_enclave_config->sym_key;
+    m_enclave_config->sequence_number = 0;
+
+    if ((m_channel_state & MUTUAL_ATTESTATION_STATE) !=
+        MUTUAL_ATTESTATION_STATE)
+    {
+        TRACE_ENCLAVE("ecall_dispatcher acknowledge_secure_channel failed as "
+                      "mutual attestation is incomplete");
+        goto exit;
+    }
+
+    if (m_crypto->sha256(encrypted_key_buf, 256, digest) != 0)
+    {
+        goto exit;
+    }
+
+    rc = m_crypto->verify_sign(
+        m_crypto->get_the_other_enclave_public_key(),
+        digest,
+        32,
+        signature,
+        signature_size);
+    if (rc != 0)
+    {
+        TRACE_ENCLAVE(
+            "enclave: acknowledge_secure_channel: signature "
+            "verification failed with %x\n",
+            rc);
+        goto exit;
+    }
+
+    TRACE_ENCLAVE("enclave: acknowledge_secure_channel: signature verified ok");
+
+    if (m_crypto->decrypt(encrypted_key_buf, 256, data, &data_size))
+    {
+        TRACE_ENCLAVE(
+            "enclave: acknowledge_secure_channel: extracted symmetric key size "
+            "= %ld",
+            data_size);
+    }
+    else
+    {
+        TRACE_ENCLAVE("enclave: acknowledge_secure_channel: symmetric key "
+                      "decrypt failed");
+        goto exit;
+    }
+
+    ret = 0;
+    m_channel_state = SECURE_CHANNEL_STATE;
+exit:
+    return ret;
+}
+
+int ecall_dispatcher::generate_encrypted_message(uint8_t** data, size_t* size)
+{
+    uint8_t encrypted_data_buf[ENCLAVE_SECRET_DATA_SIZE];
+    uint8_t tag_str[ENCLAVE_SECRET_DATA_SIZE];
+    size_t encrypted_data_size;
+    size_t total_size;
+    uint8_t iv_str[IV_SIZE];
+    int ret = 1;
+
+    if (m_channel_state != SECURE_CHANNEL_STATE)
+    {
+        TRACE_ENCLAVE(
+            "ecall_dispatcher failed as Secure Channel isn't available.");
         goto exit;
     }
 
     encrypted_data_size = sizeof(encrypted_data_buf);
-    if (m_crypto->Encrypt(
-            m_crypto->get_the_other_enclave_public_key(),
+    memset(encrypted_data_buf, 0x00, encrypted_data_size);
+    if (m_crypto->encrypt_gcm(
+            m_enclave_config->sym_key,
+            ++(m_enclave_config->sequence_number),
             m_enclave_config->enclave_secret_data,
             ENCLAVE_SECRET_DATA_SIZE,
+            iv_str,
             encrypted_data_buf,
-            &encrypted_data_size))
+            &encrypted_data_size,
+            tag_str))
     {
-        uint8_t* host_buf = (uint8_t*)oe_host_malloc(encrypted_data_size);
+        // Reason we allocate memory in the host is so that the encrypted data
+        // can be accessed by the hosts - aka real world scenario where we have
+        // 2 hosts and two enclaves. Allocate space for iv_str & tag_str to be
+        // appended after encrypted data
+        total_size = ENCLAVE_SECRET_DATA_SIZE * 2 + IV_SIZE;
+        uint8_t* host_buf = (uint8_t*)oe_host_malloc(total_size);
+        if (host_buf == NULL)
+        {
+            TRACE_ENCLAVE(
+                "enclave: generate_encrypted_message oe_host_malloc failed.");
+            goto exit;
+        }
+
+        // Copy the encrypted secret followed by the iv_str and tag_str
         memcpy(host_buf, encrypted_data_buf, encrypted_data_size);
-        TRACE_ENCLAVE(
-            "enclave: generate_encrypted_message: encrypted_data_size = %ld",
-            encrypted_data_size);
-        *data = host_buf;
         *size = encrypted_data_size;
+        memcpy(&host_buf[*size], iv_str, IV_SIZE);
+        *size += IV_SIZE;
+        memcpy(&host_buf[*size], tag_str, ENCLAVE_SECRET_DATA_SIZE);
+        *size += ENCLAVE_SECRET_DATA_SIZE;
+
+        TRACE_ENCLAVE(
+            "enclave: generate_encrypted_message: encrypted_data_size = %ld, "
+            "total_size=%ld",
+            encrypted_data_size,
+            total_size);
+        *data = host_buf;
     }
     else
     {
+        TRACE_ENCLAVE(
+            "enclave: generate_encrypted_message: encrypt_gcm failed\n");
         goto exit;
     }
     ret = 0;
@@ -219,23 +423,49 @@ exit:
     return ret;
 }
 
+// encrypted_data contains encrypted_data followed by tag_str of equal length
 int ecall_dispatcher::process_encrypted_msg(
     uint8_t* encrypted_data,
     size_t encrypted_data_size)
 {
-    uint8_t data[1024];
+    uint8_t data[ENCLAVE_SECRET_DATA_SIZE];
+    uint8_t tag_str[ENCLAVE_SECRET_DATA_SIZE];
     size_t data_size = 0;
+    uint8_t iv_str[IV_SIZE];
+    uint8_t add_str[ADD_SIZE];
     int ret = 1;
 
-    if (m_initialized == false)
+    if (m_channel_state != SECURE_CHANNEL_STATE)
     {
-        TRACE_ENCLAVE("ecall_dispatcher initialization failed.");
+        TRACE_ENCLAVE(
+            "ecall_dispatcher failed as Secure Channel isn't available.");
         goto exit;
     }
 
     data_size = sizeof(data);
-    if (m_crypto->decrypt(
-            encrypted_data, encrypted_data_size, data, &data_size))
+
+    memcpy(iv_str, &encrypted_data[ENCLAVE_SECRET_DATA_SIZE], IV_SIZE);
+    memcpy(
+        tag_str,
+        &encrypted_data[ENCLAVE_SECRET_DATA_SIZE + IV_SIZE],
+        ENCLAVE_SECRET_DATA_SIZE);
+
+    // Convert sequence number to 4 character bytes
+    m_enclave_config->sequence_number++;
+    add_str[0] = m_enclave_config->sequence_number & 0xff;
+    add_str[1] = m_enclave_config->sequence_number & 0xff00;
+    add_str[2] = m_enclave_config->sequence_number & 0xff0000;
+    add_str[3] = m_enclave_config->sequence_number & 0xff000000;
+
+    if (m_crypto->decrypt_gcm(
+            m_enclave_config->sym_key,
+            iv_str,
+            add_str,
+            encrypted_data,
+            ENCLAVE_SECRET_DATA_SIZE,
+            tag_str,
+            data,
+            &data_size))
     {
         // This is where the business logic for verifying the data should be.
         // In this sample, both enclaves start with identical data in
@@ -243,7 +473,7 @@ int ecall_dispatcher::process_encrypted_msg(
         // The following checking is to make sure the decrypted values are what
         // we have expected.
         TRACE_ENCLAVE("Decrypted data: ");
-        for (uint32_t i = 0; i < data_size; ++i)
+        for (uint32_t i = 0; i < ENCLAVE_SECRET_DATA_SIZE; ++i)
         {
             printf("%d ", data[i]);
             if (m_enclave_config->enclave_secret_data[i] != data[i])
@@ -265,7 +495,7 @@ int ecall_dispatcher::process_encrypted_msg(
         goto exit;
     }
     TRACE_ENCLAVE("Decrypted data matches with the enclave internal secret "
-                  "data: descryption validation succeeded");
+                  "data: decryption validation succeeded");
     ret = 0;
 exit:
     return ret;

@@ -49,6 +49,8 @@ int main(int argc, const char* argv[])
     size_t pem_key_size = 0;
     uint8_t* remote_report = NULL;
     size_t remote_report_size = 0;
+    uint8_t* encrypted_key = NULL;
+    size_t encrypted_key_size = 0;
 
     /* Check argument count */
     if (argc != 3)
@@ -89,7 +91,7 @@ int main(int argc, const char* argv[])
     }
     printf("Host: 1st enclave's public key: \n%s", pem_key);
 
-    printf("Host: requesting 2nd enclave to attest 1st enclave's the remote "
+    printf("Host: requesting 2nd enclave to attest 1st enclave's remote "
            "report and the public key\n");
     result = verify_report_and_set_pubkey(
         enclave_b,
@@ -156,6 +158,38 @@ int main(int argc, const char* argv[])
     free(remote_report);
     remote_report = NULL;
 
+    // Establish secure channel using an ephemeral symmetric key, encrypted and
+    // signed
+    printf(
+        "Host: Requesting secure channel to be established from 1st enclave\n");
+    result = establish_secure_channel(
+        enclave_a, &ret, &encrypted_key, &encrypted_key_size);
+    if ((result != OE_OK) || (ret != 0))
+    {
+        printf(
+            "Host: establish_secure_channel failed. %s", oe_result_str(result));
+        if (ret == 0)
+            ret = 1;
+        goto exit;
+    }
+
+    printf(
+        "Received encrypted data to establish secure channel of size = %ld\n",
+        encrypted_key_size);
+
+    printf("Host: Requesting 2nd enclave to acknowledge secure channel\n");
+    result = acknowledge_secure_channel(
+        enclave_b, &ret, encrypted_key, encrypted_key_size);
+    if ((result != OE_OK) || (ret != 0))
+    {
+        printf(
+            "Host: acknowledge_secure_channel failed. %s\n",
+            oe_result_str(result));
+        if (ret == 0)
+            ret = 1;
+        goto exit;
+    }
+
     // exchange data between enclaves, securely
     printf("Host: Requesting encrypted message from 1st enclave\n");
     result = generate_encrypted_message(
@@ -163,7 +197,7 @@ int main(int argc, const char* argv[])
     if ((result != OE_OK) || (ret != 0))
     {
         printf(
-            "Host: generate_encrypted_message failed. %s",
+            "Host: generate_encrypted_message failed. %s\n",
             oe_result_str(result));
         if (ret == 0)
             ret = 1;
@@ -175,7 +209,8 @@ int main(int argc, const char* argv[])
         enclave_b, &ret, encrypted_msg, encrypted_msg_size);
     if ((result != OE_OK) || (ret != 0))
     {
-        printf("Host: process_encrypted_msg failed. %s", oe_result_str(result));
+        printf(
+            "Host: process_encrypted_msg failed. %s\n", oe_result_str(result));
         if (ret == 0)
             ret = 1;
         goto exit;
@@ -192,7 +227,7 @@ int main(int argc, const char* argv[])
     if ((result != OE_OK) || (ret != 0))
     {
         printf(
-            "Host: generate_encrypted_message failed. %s",
+            "Host: generate_encrypted_message failed. %s\n",
             oe_result_str(result));
         if (ret == 0)
             ret = 1;
@@ -204,7 +239,8 @@ int main(int argc, const char* argv[])
         enclave_a, &ret, encrypted_msg, encrypted_msg_size);
     if ((result != OE_OK) || (ret != 0))
     {
-        printf("host process_encrypted_msg failed. %s", oe_result_str(result));
+        printf(
+            "host process_encrypted_msg failed. %s\n", oe_result_str(result));
         if (ret == 0)
             ret = 1;
         goto exit;
