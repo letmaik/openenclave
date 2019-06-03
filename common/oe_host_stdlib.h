@@ -9,10 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_MSC_VER)
-#include <malloc.h>
-#endif
-
 OE_EXTERNC_BEGIN
 
 OE_INLINE
@@ -49,11 +45,7 @@ void* oe_realloc(void* ptr, size_t size)
 OE_INLINE
 int oe_posix_memalign(void** memptr, size_t alignment, size_t size)
 {
-#if defined(_MSC_VER)
-    return _aligned_malloc(memptr, size, alignment);
-#else
     return posix_memalign(memptr, alignment, size);
-#endif
 }
 
 OE_INLINE
