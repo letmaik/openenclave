@@ -31,9 +31,6 @@ oe_result_t oe_load_module_sgx_file_system(void);
 /** Load the host resolver module (getaddrinfo, getnameinfo). */
 oe_result_t oe_load_module_host_resolver(void);
 
-/** Load the event polling module (epoll, poll, and select). */
-oe_result_t oe_load_module_host_epoll(void);
-
 OE_EXTERNC_END
 
 #endif /* _OE_BITS_MODULE_H */

@@ -6,7 +6,6 @@
 
 #include <openenclave/bits/fs.h>
 #include <openenclave/bits/result.h>
-#include <openenclave/corelibc/sys/epoll.h>
 #include <openenclave/corelibc/sys/stat.h>
 #include <openenclave/internal/posix/fd.h>
 
@@ -29,9 +28,6 @@ enum
 
     /* The non-secure host socket device. */
     OE_DEVID_HOST_SOCKET_INTERFACE,
-
-    /* The host epoll device. */
-    OE_DEVID_HOST_EPOLL,
 };
 
 /* Device names. */
@@ -39,7 +35,6 @@ enum
 #define OE_DEVICE_NAME_HOST_FILE_SYSTEM OE_HOST_FILE_SYSTEM
 #define OE_DEVICE_NAME_SGX_FILE_SYSTEM OE_SGX_FILE_SYSTEM
 #define OE_DEVICE_NAME_HOST_SOCKET_INTERFACE "oe_host_socket_interface"
-#define OE_DEVICE_NAME_HOST_EPOLL "oe_host_epoll"
 
 typedef enum _oe_device_type
 {
@@ -47,7 +42,6 @@ typedef enum _oe_device_type
     OE_DEVICE_TYPE_ANY,
     OE_DEVICE_TYPE_FILE_SYSTEM,
     OE_DEVICE_TYPE_SOCKET_INTERFACE,
-    OE_DEVICE_TYPE_EPOLL,
 } oe_device_type_t;
 
 typedef struct _oe_device oe_device_t;
@@ -113,16 +107,6 @@ typedef struct _oe_socket_device_ops
 
 } oe_socket_device_ops_t;
 
-typedef struct _oe_epoll_device_ops
-{
-    oe_device_ops_t base;
-
-    oe_fd_t* (*epoll_create)(oe_device_t* epfd_device, int size);
-
-    oe_fd_t* (*epoll_create1)(oe_device_t* epfd_device, int flags);
-
-} oe_epoll_device_ops_t;
-
 typedef struct _oe_device oe_device_t;
 
 struct _oe_device
@@ -138,7 +122,6 @@ struct _oe_device
         oe_device_ops_t device;
         oe_fs_device_ops_t fs;
         oe_socket_device_ops_t socket;
-        oe_epoll_device_ops_t epoll;
     } ops;
 };
 

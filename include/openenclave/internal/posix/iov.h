@@ -6,7 +6,6 @@
 
 #include <openenclave/bits/fs.h>
 #include <openenclave/bits/result.h>
-#include <openenclave/corelibc/sys/epoll.h>
 #include <openenclave/corelibc/sys/stat.h>
 #include <openenclave/internal/posix/fd.h>
 

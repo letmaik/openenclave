@@ -79,13 +79,10 @@ add_library(oelibc STATIC
     strerror.c
     sysconf.c
     socket.c
-    epoll.c
     poll.c
     stat.c
     errno.c
     setjmp.c
-    signal.c
-    sigaction.c
     time.c
     __printf_chk.c
     __vfprintf_chk.c
@@ -530,7 +527,6 @@ add_library(oelibc STATIC
      ${MUSLSRC}/search/lsearch.c
      ${MUSLSRC}/select/select.c
      ${MUSLSRC}/select/poll.c
-     ${MUSLSRC}/linux/epoll.c
      ${MUSLSRC}/signal/kill.c
      #${MUSLSRC}/signal/signal.c
      #${MUSLSRC}/signal/sigaction.c

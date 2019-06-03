@@ -6,12 +6,10 @@
 #include <openenclave/corelibc/errno.h>
 #include <openenclave/corelibc/fcntl.h>
 #include <openenclave/corelibc/setjmp.h>
-#include <openenclave/corelibc/signal.h>
 #include <openenclave/corelibc/stdarg.h>
 #include <openenclave/corelibc/stdio.h>
 #include <openenclave/corelibc/stdlib.h>
 #include <openenclave/corelibc/string.h>
-#include <openenclave/corelibc/sys/epoll.h>
 #include <openenclave/corelibc/sys/ioctl.h>
 #include <openenclave/corelibc/sys/mount.h>
 #include <openenclave/corelibc/sys/poll.h>
@@ -704,50 +702,6 @@ static long _syscall(
             }
 
             ret = oe_poll(fds, nfds, timeout);
-            goto done;
-        }
-#if defined(OE_SYS_epoll_create)
-        case OE_SYS_epoll_create:
-        {
-            int size = (int)arg1;
-            ret = oe_epoll_create(size);
-            goto done;
-        }
-#endif
-        case OE_SYS_epoll_create1:
-        {
-            int flags = (int)arg1;
-            ret = oe_epoll_create1(flags);
-            goto done;
-        }
-#if defined(OE_SYS_epoll_wait)
-        case OE_SYS_epoll_wait:
-        {
-            int epfd = (int)arg1;
-            struct oe_epoll_event* events = (struct oe_epoll_event*)arg2;
-            int maxevents = (int)arg3;
-            int timeout = (int)arg4;
-            ret = oe_epoll_wait(epfd, events, maxevents, timeout);
-            goto done;
-        }
-#endif
-        case OE_SYS_epoll_pwait:
-        {
-            int epfd = (int)arg1;
-            struct oe_epoll_event* events = (struct oe_epoll_event*)arg2;
-            int maxevents = (int)arg3;
-            int timeout = (int)arg4;
-            const oe_sigset_t* sigmask = (const oe_sigset_t*)arg5;
-            ret = oe_epoll_pwait(epfd, events, maxevents, timeout, sigmask);
-            goto done;
-        }
-        case OE_SYS_epoll_ctl:
-        {
-            int epfd = (int)arg1;
-            int op = (int)arg2;
-            int fd = (int)arg3;
-            struct oe_epoll_event* event = (struct oe_epoll_event*)arg4;
-            ret = oe_epoll_ctl(epfd, op, fd, event);
             goto done;
         }
         case OE_SYS_exit_group:

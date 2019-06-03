@@ -31,7 +31,6 @@ add_library(oeposix STATIC
     device.c
     dirent.c
     ioctl.c
-    epoll.c
     fcntl.c
     fdtable.c
     iov.c

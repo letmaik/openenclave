@@ -3,7 +3,9 @@
 
 enclave {
 
-    from "sgxfs.edl" import *;
+
+    // Uncomment to run SGXFS tests (coming soon in a subsequent PR).
+    // from "sgxfs.edl" import *;
 
     trusted {
         public void test_fs(
