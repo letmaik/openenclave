@@ -11,4 +11,4 @@ set(TMP_DIR "${CMAKE_CURRENT_BINARY_DIR}/tmp")
 
 add_test(tests/hostfs1 cmake -E remove_directory "${TMP_DIR}")
 
-add_enclave_test(tests/hostfs hostfs_host hostfs_enc "${TMP_DIR}")
+add_enclave_test(tests/hostfs2 hostfs_host hostfs_enc "${TMP_DIR}")
