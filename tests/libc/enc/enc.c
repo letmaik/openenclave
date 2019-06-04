@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <time.h>
 #include "libc_t.h"
 #include "mtest.h"
@@ -122,6 +123,16 @@ extern int run_tests(void);
 
 int test()
 {
+    OE_TEST(oe_load_module_host_file_system() == OE_OK);
+    OE_TEST(oe_load_module_host_socket_interface() == OE_OK);
+    OE_TEST(oe_load_module_host_resolver() == OE_OK);
+
+    if (mount("/", "/", OE_HOST_FILE_SYSTEM, 0, NULL) != 0)
+    {
+        fprintf(stderr, "mount() failed\n");
+        exit(1);
+    }
+
     return run_tests();
 }
 
