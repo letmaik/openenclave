@@ -784,8 +784,6 @@ __declspec(noreturn) static void _panic(
     abort();
 }
 
-#define PANIC _panic(__FILE__, __LINE__, __FUNCTION__);
-
 /*
 **==============================================================================
 **
@@ -1123,24 +1121,6 @@ ssize_t oe_posix_writev_ocall(
 
 done:
     return ret;
-}
-
-ssize_t oe_posix_readv_ocall(
-    oe_host_fd_t fd,
-    void* iov_buf,
-    int iovcnt,
-    size_t iov_buf_size)
-{
-    PANIC;
-}
-
-ssize_t oe_posix_writev_ocall(
-    oe_host_fd_t fd,
-    const void* iov_buf,
-    int iovcnt,
-    size_t iov_buf_size)
-{
-    PANIC;
 }
 
 oe_off_t oe_posix_lseek_ocall(oe_host_fd_t fd, oe_off_t offset, int whence)
@@ -2083,24 +2063,6 @@ done:
     return ret;
 }
 
-ssize_t oe_posix_recvv_ocall(
-    oe_host_fd_t fd,
-    void* iov_buf,
-    int iovcnt,
-    size_t iov_buf_size)
-{
-    PANIC;
-}
-
-ssize_t oe_posix_sendv_ocall(
-    oe_host_fd_t fd,
-    const void* iov_buf,
-    int iovcnt,
-    size_t iov_buf_size)
-{
-    PANIC;
-}
-
 int oe_posix_shutdown_ocall(oe_host_fd_t sockfd, int how)
 {
     int ret = -1;
@@ -2191,11 +2153,6 @@ int oe_posix_ioctl_ocall(oe_host_fd_t fd, uint64_t request, uint64_t arg)
     }
 
     return -1;
-}
-
-int oe_posix_ioctl_ocall(oe_host_fd_t fd, uint64_t request, uint64_t arg)
-{
-    PANIC;
 }
 
 int oe_posix_setsockopt_ocall(
@@ -2755,22 +2712,6 @@ done:
         free(fds);
 
     return ret;
-}
-
-/*
-**==============================================================================
-**
-** poll:
-**
-**==============================================================================
-*/
-
-int oe_posix_poll_ocall(
-    struct oe_host_pollfd* host_fds,
-    oe_nfds_t nfds,
-    int timeout)
-{
-    PANIC;
 }
 
 /*
