@@ -47,8 +47,6 @@ void oe_abort(void);
 
 OE_NO_RETURN void oe_exit(int status);
 
-int oe_atoi(const char* nptr);
-
 /*
 **==============================================================================
 **
@@ -81,11 +79,6 @@ OE_INLINE void abort(void)
 OE_INLINE void exit(int status)
 {
     return oe_exit(status);
-}
-
-OE_INLINE int atoi(const char* nptr)
-{
-    return oe_atoi(nptr);
 }
 
 #endif /* defined(OE_NEED_STDC_NAMES) */

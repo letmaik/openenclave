@@ -201,11 +201,6 @@ char* oe_strrchr(const char* s, int c)
     return NULL;
 }
 
-int oe_atoi(const char* nptr)
-{
-    return (int)oe_strtol(nptr, NULL, 10);
-}
-
 char* oe_strchrnul(const char* s, int c)
 {
     char* p;
