@@ -12,6 +12,7 @@ int main(int argc, const char* argv[])
     oe_enclave_t* enclave = NULL;
     const uint32_t flags = oe_get_create_flags();
     const oe_enclave_type_t type = OE_ENCLAVE_TYPE_SGX;
+    extern char* oe_win_path_to_posix(const char* path);
 
     if (argc != 3)
     {
@@ -28,7 +29,9 @@ int main(int argc, const char* argv[])
 
 #if defined(_WIN32)
     tmp_dir = oe_win_path_to_posix(tmp_dir);
+    OE_TEST(tmp_dir != NULL);
 #endif
+
     r = test_hostfs(enclave, tmp_dir);
     OE_TEST(r == OE_OK);
 

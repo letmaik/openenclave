@@ -50,7 +50,7 @@ OE_INLINE
 int oe_posix_memalign(void** memptr, size_t alignment, size_t size)
 {
 #if defined(_MSC_VER)
-    return _aligned_malloc(memptr, size, alignment);
+    return _aligned_malloc(memptr, alignment, size);
 #else
     return posix_memalign(memptr, alignment, size);
 #endif

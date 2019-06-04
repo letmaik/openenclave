@@ -171,11 +171,6 @@ unsigned long int oe_strtoul(const char* nptr, char** endptr, int base)
     return x;
 }
 
-long int oe_strtol(const char* nptr, char** endptr, int base)
-{
-    return (long)oe_strtoul(nptr, endptr, base);
-}
-
 /*
 **==============================================================================
 **

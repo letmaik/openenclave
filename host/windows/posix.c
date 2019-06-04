@@ -784,8 +784,6 @@ __declspec(noreturn) static void _panic(
     abort();
 }
 
-#define PANIC _panic(__FILE__, __LINE__, __FUNCTION__);
-
 /*
 **==============================================================================
 **
@@ -956,17 +954,6 @@ oe_host_fd_t oe_posix_open_ocall(
 
         ret = (oe_host_fd_t)h;
 
-#if 0
-	// Windows doesn't do mode very well. We translate. Win32 only cares about 
-	// user read/write. 
-	int wmode = ( (mode & OE_S_IRUSR)? _S_IREAD : 0) | ((mode & OE_S_IWUSR)?  _S_IWRITE: 0);
-
-        int retx = _wchmod(wpathname, wmode);
-	if (retx < 0)
-	{
-	     printf("chmod failed, err = %d\n", GetLastError());
-	}
-#endif
         if (wpathname)
         {
             free(wpathname);
