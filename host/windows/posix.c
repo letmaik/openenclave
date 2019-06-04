@@ -712,52 +712,52 @@ static int _sockoptlevel_to_winsock_optlevel(int level)
     }
 }
 
-long epoll_event_to_win_network_event(epoll_events)
+short epoll_event_to_win_poll_event(long epoll_events)
 {
-    long ret = FD_ALL_EVENTS; // 0;
+    short ret = 0;
 
     if (OE_EPOLLIN & epoll_events)
     {
-        ret |= FD_READ;
+        ret |= POLLRDBAND | POLLRDNORM;
     }
     if (OE_EPOLLPRI & epoll_events)
     {
-        ret |= FD_READ | FD_WRITE | FD_CLOSE;
+        ret |= POLLPRI;
     }
     if (OE_EPOLLOUT & epoll_events)
     {
-        ret |= FD_WRITE;
+        ret |= POLLWRNORM;
     }
     if (OE_EPOLLRDNORM & epoll_events)
     {
-        ret |= FD_READ;
+        ret |= POLLRDNORM;
     }
     if (OE_EPOLLRDBAND & epoll_events)
     {
-        ret |= FD_READ | FD_OOB;
+        ret |= POLLRDBAND;
     }
     if (OE_EPOLLWRNORM & epoll_events)
     {
-        ret |= FD_WRITE;
+        ret |= POLLWRNORM;
     }
     if (OE_EPOLLWRBAND & epoll_events)
     {
-        ret |= FD_WRITE | FD_OOB;
+        // ret |= FD_WRITE | FD_OOB; skip
     }
     if (OE_EPOLLMSG & epoll_events)
     {
     }
     if (OE_EPOLLERR & epoll_events)
     {
-        ret |= FD_CLOSE;
+        // ret |= FD_CLOSE;
     }
     if (OE_EPOLLHUP & epoll_events)
     {
-        ret |= FD_CLOSE;
+        // ret |= FD_CLOSE;
     }
     if (OE_EPOLLRDHUP & epoll_events)
     {
-        ret |= FD_CLOSE;
+        // ret |= FD_CLOSE;
     }
     if (OE_EPOLLEXCLUSIVE & epoll_events)
     {
@@ -770,6 +770,45 @@ long epoll_event_to_win_network_event(epoll_events)
     }
     if (OE_EPOLLET & epoll_events)
     {
+    }
+    return ret;
+}
+
+long win_poll_event_to_epoll(short poll_revents)
+{
+    long ret = 0;
+
+    if (POLLIN & poll_revents)
+    {
+        ret |= OE_EPOLLIN;
+    }
+    if (POLLPRI & poll_revents)
+    {
+        ret |= OE_EPOLLPRI;
+    }
+    if (POLLOUT & poll_revents)
+    {
+        ret |= OE_POLLWRNORM|OE_POLLWRBAND;
+    }
+    if (POLLRDNORM & poll_revents)
+    {
+        ret |= OE_EPOLLRDNORM;
+    }
+    if (POLLRDBAND & poll_revents)
+    {
+        ret |= OE_EPOLLRDBAND;
+    }
+    if (POLLWRNORM & poll_revents)
+    {
+        ret |= OE_EPOLLWRNORM;
+    }
+    if (POLLERR & poll_revents)
+    {
+        ret |= OE_EPOLLERR;
+    }
+    if (POLLHUP & poll_revents)
+    {
+        ret |= OE_EPOLLHUP;
     }
     return ret;
 }
@@ -2656,51 +2695,108 @@ struct WIN_EPOLL_ENTRY
     int max_events;
     int num_events;
     struct WIN_EPOLL_EVENT* pevents;
-    WSAEVENT* pWaitHandles; // We wait on this.... The array indeices are
+    WSAPOLLFD* pWaitHandles; // We wait on this.... The array indeices are
                             // parallel to pevents
 };
 
-static int _del_epoll_event(oe_host_fd_t epfd, HANDLE fd)
+static int _mod_epoll_event(
+    oe_host_fd_t epfd,
+    HANDLE fd,
+    uint32_t events,
+    oe_epoll_data_t data)
 {
     int ret = -1;
-    struct WIN_EPOLL_ENTRY* pentry = _epoll_table + epfd;
-    struct WIN_EPOLL_EVENT* pevents = NULL;
-    WSAEVENT* pwaithandles = NULL;
+    struct WIN_EPOLL_ENTRY* pepoll = _epoll_table + epfd;
+    struct WIN_EPOLL_EVENT* pevent = pepoll->pevents;
+    WSAPOLLFD* pwaithandle = pepoll->pWaitHandles;
 
-    pevents = pentry->pevents;
-    pwaithandles = pentry->pWaitHandles;
-    int ev_idx = 0;
-    for (; ev_idx < pentry->num_events; ev_idx++)
+    int i = 0;
+    for ( ; i < pepoll->num_events; i++ )
     {
-        if (pevents->fd == fd)
+        if (pevent[i].valid == true && pevent[i].fd == fd)
         {
             break;
         }
     }
 
-    // WaitForMultipleObjects doesn't allow voided values in the array. So when
-    // we delete an event we have to compact the array
-    if (ev_idx < pentry->num_events)
+    if (i >= pepoll->num_events)
     {
-        memmove(
-            pevents + ev_idx,
-            pevents + ev_idx + 1,
-            sizeof(struct WIN_EPOLL_EVENT) * (pentry->num_events - ev_idx));
-        memmove(
-            pwaithandles + ev_idx,
-            pwaithandles + ev_idx + 1,
-            sizeof(HANDLE) * (pentry->num_events - ev_idx));
-        pentry->num_events--;
-        ret = 0;
-    }
-    else
-    {
-        // not foud
+        _set_errno(OE_EINVAL);
+        goto done;
     }
 
+    pevent += i;
+    pwaithandle += i;
+
+    pevent->valid = true;
+    pevent->event.events = events;
+    pevent->event.data = data;
+    pevent->epfd = epfd;
+    pevent->fd = fd;
+    // ATTN:
+    // We create the event for both file and socket.
+    // We expect that a non socket fd will fail in wait.
+    pwaithandle->fd = (SOCKET)fd;
+    pwaithandle->events  = epoll_event_to_win_poll_event(events);
+    pwaithandle->revents = 0;
+
+    ret = (int)(pevent - pepoll->pevents);
+
+done:
     return ret;
 }
 
+
+static int _del_epoll_event(oe_host_fd_t epfd, HANDLE fd)
+{
+    int ret = -1;
+    struct WIN_EPOLL_ENTRY* pepoll = _epoll_table + epfd;
+    struct WIN_EPOLL_EVENT* pevent = pepoll->pevents;
+    WSAPOLLFD* pwaithandle = pepoll->pWaitHandles;
+
+    int i = 0;
+    for ( ; i < pepoll->num_events; i++ )
+    {
+        if (pevent[i].valid == true && pevent[i].fd == fd)
+        {
+            break;
+        }
+    }
+
+    if (i >= pepoll->num_events)
+    {
+        _set_errno(OE_EINVAL);
+        goto done;
+    }
+
+    pevent += i;
+    pwaithandle += i;
+
+    pevent->valid = false;
+    pevent->event.events = 0;
+    pevent->event.data.u64 = 0;
+    pevent->epfd = 0;
+    pevent->fd = (HANDLE)INVALID_HANDLE_VALUE;
+    // ATTN:
+    // We create the event for both file and socket.
+    // We expect that a non socket fd will fail in wait.
+    pwaithandle->fd = -1;
+    pwaithandle->events  = 0;
+    pwaithandle->revents = 0;
+
+    ret = (int)(pevent - pepoll->pevents);
+done:
+    return ret;
+}
+
+
+
+// Two data structures.
+// 1. An array of the enclave data including eveything necessary to report to the enclave.
+// 2. A contiguous array of WSAEventHandles which is used by WaitForMultipleObjects. This 
+//    has to be pure Event handles.
+// The two arrays are related by the index.
+//
 static int _add_epoll_event(
     oe_host_fd_t epfd,
     HANDLE fd,
@@ -2729,48 +2825,37 @@ static int _add_epoll_event(
 
         // And wait handles
 
-        WSAEVENT* new_epoll_wait_handles = (WSAEVENT*)calloc(
+        WSAPOLLFD* new_wsapollfds = (WSAPOLLFD*)calloc(
             1,
-            sizeof(WSAEVENT) *
+            sizeof(WSAPOLLFD) *
                 (new_events_size + 1)); // We alloc an extra entry
                                         // for the WakeHandle
 
         if (pentry->pWaitHandles != NULL)
         {
             memcpy(
-                new_epoll_wait_handles,
+                new_wsapollfds,
                 pentry->pWaitHandles,
-                sizeof(struct WIN_EPOLL_EVENT) * pentry->max_events);
+                sizeof(WSAPOLLFD) * pentry->max_events);
             free(pentry->pWaitHandles);
         }
-        pentry->pWaitHandles = new_epoll_wait_handles;
+        pentry->pWaitHandles = new_wsapollfds;
         pentry->max_events = new_events_size;
     }
 
     struct WIN_EPOLL_EVENT* pevent = pentry->pevents + pentry->num_events;
-    WSAEVENT* pwaithandle = pentry->pWaitHandles + pentry->num_events;
+    WSAPOLLFD* pwaithandle = pentry->pWaitHandles + pentry->num_events;
     pevent->valid = true;
     pevent->event.events = events;
     pevent->event.data = data;
     pevent->epfd = epfd;
-    pevent->fd = fd;
+    pevent->fd = (HANDLE)fd;
     // ATTN:
     // We create the event for both file and socket.
-    // For socket we associate the event with the socket via WSAEventSelect.
-    // For file, we would just wait on the file, but that is deprecated. The
-    // file ops need to use completion ports and alert the event.
-    *pwaithandle = WSACreateEvent(); // auto reset.
-
-    BY_HANDLE_FILE_INFORMATION fi = {0};
-    if (GetFileInformationByHandle(fd, &fi))
-    {
-        printf("file handle\n");
-    }
-    else
-    {
-        (void)WSAEventSelect(
-            (SOCKET)fd, *pwaithandle, epoll_event_to_win_network_event(events));
-    }
+    // We expect that a non socket fd will fail in wait. 
+    pwaithandle->fd = (SOCKET)fd;
+    pwaithandle->events  = epoll_event_to_win_poll_event(events);
+    pwaithandle->revents = 0;
 
     pentry->num_events++;
 
@@ -2869,50 +2954,31 @@ int oe_posix_epoll_wait_ocall(
     int ret = -1;
     struct WIN_EPOLL_ENTRY* pepoll = _epoll_table + epfd;
 
-    if (pepoll->num_events == 0)
-    {
-        // Even with nothing, we wait for the wait event
-        ret = WSAWaitForMultipleEvents(
-            1, &_epoll_hWakeEvent, FALSE, timeout, TRUE);
-    }
-    else
-    {
-        pepoll->pWaitHandles[pepoll->num_events] = _epoll_hWakeEvent;
-        ret = WSAWaitForMultipleEvents(
-            pepoll->num_events + 1, pepoll->pWaitHandles, FALSE, timeout, TRUE);
-    }
+    //pepoll->pWaitHandles[pepoll->num_events] = _epoll_hWakeEvent;
+    ret = WSAPoll(pepoll->pWaitHandles, pepoll->num_events, timeout);
     switch (ret)
     {
-        case WSA_WAIT_TIMEOUT:
-            ret = 0;
+        case 0: // Timeout
             break;
-        case WSA_WAIT_IO_COMPLETION:
-            ret = 0;
-            break;
-        case WSA_WAIT_FAILED:
+        case SOCKET_ERROR:
             _set_errno(_winsockerr_to_errno(WSAGetLastError()));
             ret = -1;
             break;
         default:
-            if (ret == pepoll->num_events)
+            int i = 0; 
+            int ev_cnt = 0;
+            for (i = 0; i < pepoll->num_events; i++)
             {
-                _set_errno(EINTR);
-                ret = -1;
+                if (pepoll->pWaitHandles[i].revents)
+                {
+                    events[ev_cnt].events = win_poll_event_to_epoll(pepoll->pWaitHandles[i].revents);
+                    events[ev_cnt].data = pepoll->pevents[i].event.data;
+
+                    pepoll->pWaitHandles[i].revents = 0;
+                    ev_cnt++;
+                }
             }
-            else if (ret < pepoll->num_events)
-            {
-                events[0].events =
-                    pepoll->pevents[ret]
-                        .event
-                        .events; // We will produce a number of false alarms
-                                 // here. If you ask for read|write you will get
-                                 // read and write every time you are signaled.
-                                 // The reason is that we don't get any info
-                                 // back from wait for multiple events. So the
-                                 // app will be signaled extra.
-                events[0].data = pepoll->pevents[ret].event.data;
-                ret = 1; // We get alerted for one at a time
-            }
+            ret = ev_cnt;
             break;
     }
     return ret;
@@ -2936,8 +3002,7 @@ int oe_posix_epoll_ctl_ocall(
     switch (op)
     {
         case 1: // EPOLL_ADD
-            if (_add_epoll_event(epfd, (HANDLE)fd, event->events, event->data) <
-                0)
+            if (_add_epoll_event(epfd, (HANDLE)fd, event->events, event->data) < 0)
             {
                 // errno set in add_epoll_event
                 return -1;
@@ -2945,9 +3010,19 @@ int oe_posix_epoll_ctl_ocall(
             return 0;
 
         case 2: // EPOLL_DEL
+            if (_del_epoll_event(epfd, (HANDLE)fd) < 0)
+            {
+                // errno set in del_epoll_event
+                return -1;
+            }
             return 0;
 
         case 3: // OE_EPOLL_MOD:
+            if (_mod_epoll_event(epfd, (HANDLE)fd, event->events, event->data) < 0)
+            {
+                // errno set in add_epoll_event
+                return -1;
+            }
             return 0;
         default:
             break;
@@ -2977,12 +3052,7 @@ int oe_posix_epoll_close_ocall(oe_host_fd_t epfd)
         int ev_idx = 0;
         for (; ev_idx < pepoll->num_events; ev_idx++)
         {
-            BY_HANDLE_FILE_INFORMATION fi = {0};
-            if (!GetFileInformationByHandle(pepoll->pWaitHandles[ev_idx], &fi))
-            {
-                // Not a file, then it is an added event
-                CloseHandle(pepoll->pWaitHandles[ev_idx]);
-            }
+            closesocket(pepoll->pWaitHandles[ev_idx].fd);
         }
         free(pepoll->pWaitHandles);
         pepoll->pWaitHandles = NULL;
