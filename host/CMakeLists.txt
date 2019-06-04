@@ -187,22 +187,22 @@ if (USE_LIBSGX)
   elseif (WIN32)
 
     find_library(LIBSGX_COMMON NAMES sgx_enclave_common
-      PATHS ${CMAKE_SOURCE_DIR}/prereqs/nuget/EnclaveCommonAPI.1.0.100.0/lib/native/x64-Release)
+      PATHS ${CMAKE_SOURCE_DIR}/prereqs/nuget/EnclaveCommonAPI/lib/native/x64-Release)
     find_library(LIBSGX_QE NAMES sgx_dcap_ql
-      PATHS ${CMAKE_SOURCE_DIR}/prereqs/nuget/DCAP_Components.1.1.100.1/build/lib/native/Libraries)
+      PATHS ${CMAKE_SOURCE_DIR}/prereqs/nuget/DCAP_Components/build/lib/native/Libraries)
     if (NOT LIBSGX_COMMON OR NOT LIBSGX_QE)
       message(FATAL_ERROR "No SGX libraries found, aborting! Set -DUSE_LIBSGX=OFF to ignore.")
     endif ()
 
     add_library(sgx_enclave_common SHARED IMPORTED)
     set_target_properties(sgx_enclave_common PROPERTIES
-      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/prereqs/nuget/EnclaveCommonAPI.1.0.100.0/Header Files"
+      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/prereqs/nuget/EnclaveCommonAPI/Header Files"
       IMPORTED_LOCATION $ENV{WINDIR}/System32
       IMPORTED_IMPLIB ${LIBSGX_COMMON})
 
     add_library(sgx_dcap_ql SHARED IMPORTED)
     set_target_properties(sgx_dcap_ql PROPERTIES
-      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/prereqs/nuget/DCAP_Components.1.1.100.1/build/Header Files"
+      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/prereqs/nuget/DCAP_Components/build/Header Files"
       IMPORTED_LOCATION $ENV{WINDIR}/System32
       IMPORTED_IMPLIB ${LIBSGX_QE})
   endif ()
