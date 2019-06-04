@@ -37,8 +37,6 @@ int oe_posix_memalign(void** memptr, size_t alignment, size_t size);
 
 unsigned long int oe_strtoul(const char* nptr, char** endptr, int base);
 
-long int oe_strtol(const char* nptr, char** endptr, int base);
-
 int oe_atexit(void (*function)(void));
 
 char* oe_realpath(const char* path, oe_posix_path_t* resolved_path);
@@ -60,11 +58,6 @@ OE_NO_RETURN void oe_exit(int status);
 #include <openenclave/corelibc/bits/atexit.h>
 #include <openenclave/corelibc/bits/malloc.h>
 #include <openenclave/corelibc/bits/strtoul.h>
-
-OE_INLINE long int strtol(const char* nptr, char** endptr, int base)
-{
-    return oe_strtol(nptr, endptr, base);
-}
 
 OE_INLINE char* realpath(const char* path, char* resolved_path)
 {
